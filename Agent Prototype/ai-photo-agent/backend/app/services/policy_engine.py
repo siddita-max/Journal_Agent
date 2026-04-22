@@ -11,7 +11,7 @@ Supports:
 Policy document schema (JSON):
 {
   "max_people": 10,
-  "prohibited_objects": ["cell phone", "laptop"],
+  "prohibited_objects": ["cell phone"],
   "min_professionalism_score": 0.55,
   "required_context_prompts": ["corporate office", "professional setting"],
   "dress_code": {
@@ -40,7 +40,7 @@ Policy document schema (JSON):
 """
 from __future__ import annotations
 
-import json
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -65,6 +65,85 @@ DEFAULT_POLICY: Dict[str, Any] = {
 }
 
 
+SCHOOL_CHILD_SAFETY_POLICY: Dict[str, Any] = {
+    "name": "school_journal_policy_v1",
+    "version": "1.1",
+    "description": "Journal image selection policy for school settings",
+    "max_people": 10,
+    "prohibited_objects": ["cell phone"],
+    "quality_gates": {
+        "min_resolution": [1280, 720],
+        "preferred_resolution": [1920, 1080],
+        "min_sharpness_score": 80,
+        "min_brightness": 40,
+        "max_brightness": 220,
+        "blur_threshold": 120,
+        "allowed_formats": ["jpeg", "jpg", "png", "webp"],
+        "reject_if_any_fail": True,
+    },
+    "safety_rules": [
+        {
+            "id": "SR-01",
+            "name": "adult_child_isolation",
+            "description": "Student must not be alone with a single adult in a private/non-classroom setting",
+            "condition": {
+                "detected_persons": {"adults": 1, "children": {"gte": 1}},
+                "setting": {"not_in": ["classroom", "outdoor_group", "hallway", "gymnasium", "cafeteria"]},
+            },
+            "action": "FLAG",
+            "priority": "HIGH",
+            "applies_to_setting": "non_school_only",
+            "note": "Skip this rule if CLIP confirms setting is a formal school environment",
+        },
+        {
+            "id": "SR-02",
+            "name": "teacher_student_ratio",
+            "description": "Max 1 adult per 4 students in frame",
+            "condition": {"ratio": {"adults_to_children": {"gt": 0.25}}},
+            "action": "REJECT",
+            "priority": "HIGH",
+        },
+        {
+            "id": "SR-03",
+            "name": "sharp_objects_present",
+            "description": "Sharp objects (scissors, knives, blades) must not appear",
+            "yolo_classes": ["scissors", "knife", "blade", "cutter"],
+            "action": "REJECT",
+            "priority": "CRITICAL",
+        },
+        {
+            "id": "SR-04",
+            "name": "nsfw_check",
+            "action": "REJECT",
+            "priority": "CRITICAL",
+        },
+    ],
+    "journal_matching": {
+        "enabled": True,
+        "clip_similarity_threshold": 0.28,
+        "reject_below_threshold": True,
+        "strategy": "per_image_independent",
+        "note": "Each image is scored against journal description independently — no dependency on previous photos",
+    },
+    "scoring_weights": {
+        "clip_semantic_match": 0.35,
+        "image_quality": 0.25,
+        "safety_compliance": 0.30,
+        "composition_score": 0.10,
+    },
+    "decision_thresholds": {
+        "approve": 0.72,
+        "review": 0.50,
+        "reject": 0.0,
+    },
+}
+
+
+def get_school_child_safety_policy() -> Dict[str, Any]:
+    """Return a copy of the fixed school journal policy used by the pipeline."""
+    return copy.deepcopy(SCHOOL_CHILD_SAFETY_POLICY)
+
+
 # ─── Result types ─────────────────────────────────────────────────────────
 
 @dataclass
@@ -85,6 +164,7 @@ class PolicyViolation:
 @dataclass
 class PolicyResult:
     hard_rejected: bool = False
+    flagged: bool = False
     compliance_score: float = 1.0           # 0–1, factored into object_compliance_score
     violations: List[PolicyViolation] = field(default_factory=list)
 
@@ -113,7 +193,11 @@ class PolicyEngine:
     """
 
     def __init__(self, policy: Optional[Dict[str, Any]] = None):
-        self.policy = self._merge_with_defaults(policy or {})
+        policy = policy or {}
+        if "quality_gates" in policy and "safety_rules" in policy:
+            self.policy = copy.deepcopy(policy)
+        else:
+            self.policy = self._merge_with_defaults(policy)
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -129,6 +213,13 @@ class PolicyEngine:
         """
         result = PolicyResult()
         penalty = 0.0  # Accumulated soft penalty
+
+        if "safety_rules" in self.policy:
+            penalty += self._evaluate_school_journal_rules(
+                result,
+                yolo_result=yolo_result,
+                clip_result=clip_result,
+            )
 
         # ── 1. People count ──────────────────────────────────────────
         max_people = self.policy.get("max_people", 10)
@@ -239,6 +330,111 @@ class PolicyEngine:
 
     # ── Custom rule evaluators ────────────────────────────────────
 
+    def _evaluate_school_journal_rules(
+        self,
+        result: PolicyResult,
+        yolo_result=None,
+        clip_result=None,
+    ) -> float:
+        """Evaluate school_journal_policy_v1 safety rules."""
+        if yolo_result is None:
+            return 0.0
+
+        penalty = 0.0
+        rules = {rule.get("id"): rule for rule in self.policy.get("safety_rules", [])}
+        person_estimates = getattr(yolo_result, "person_estimates", []) or []
+        if person_estimates:
+            adults = sum(1 for p in person_estimates if p.get("role") == "teacher")
+            children = sum(1 for p in person_estimates if p.get("role") == "student")
+            uncertain = sum(1 for p in person_estimates if p.get("role") == "uncertain")
+        else:
+            adults = int(getattr(yolo_result, "teacher_count", 0) or 0)
+            children = int(getattr(yolo_result, "student_count", 0) or 0)
+            uncertain = int(getattr(yolo_result, "uncertain_count", 0) or 0)
+            if children == 0 and adults == 0:
+                children = int(getattr(yolo_result, "people_count", 0) or 0)
+        effective_children = children + uncertain
+
+        school_setting = self._is_formal_school_setting(clip_result)
+
+        if rules.get("SR-01") and adults == 1 and effective_children >= 1 and school_setting is not True:
+            rule = rules["SR-01"]
+            result.flagged = True
+            penalty += 0.15
+            result.violations.append(PolicyViolation(
+                rule_name=rule["id"],
+                severity="flag",
+                description=rule["description"],
+                measured_value={
+                    "adults": adults,
+                    "children": children,
+                    "uncertain": uncertain,
+                    "school_setting": school_setting,
+                },
+                threshold="formal school setting required",
+            ))
+
+        if getattr(yolo_result, "phone_detected", False):
+            result.hard_rejected = True
+            result.violations.append(PolicyViolation(
+                rule_name="cellphone_not_allowed",
+                severity="hard",
+                description="Cellphone detected in frame",
+                measured_value="cell phone",
+                threshold="not allowed",
+            ))
+
+        if rules.get("SR-02") and effective_children > 0:
+            ratio = adults / effective_children
+            if ratio > 0.25:
+                rule = rules["SR-02"]
+                result.hard_rejected = True
+                result.violations.append(PolicyViolation(
+                    rule_name=rule["id"],
+                    severity="hard",
+                    description=rule["description"],
+                    measured_value=round(ratio, 3),
+                    threshold=0.25,
+                ))
+
+        sharp_rule = rules.get("SR-03")
+        if sharp_rule:
+            sharp_classes = {c.lower() for c in sharp_rule.get("yolo_classes", [])}
+            flagged_objects = getattr(yolo_result, "flagged_objects", []) or []
+            detected_classes = {d.get("class", "").lower() for d in flagged_objects}
+            detected_classes.update({
+                d.get("class", "").lower()
+                for d in (getattr(yolo_result, "detections", []) or [])
+                if d.get("class", "").lower() in sharp_classes
+            })
+            if detected_classes:
+                result.hard_rejected = True
+                result.violations.append(PolicyViolation(
+                    rule_name=sharp_rule["id"],
+                    severity="hard",
+                    description=sharp_rule["description"],
+                    measured_value=sorted(detected_classes),
+                    threshold="not allowed",
+                ))
+
+        return penalty
+
+    @staticmethod
+    def _is_formal_school_setting(clip_result) -> Optional[bool]:
+        if clip_result is None:
+            return None
+
+        prompt_scores = getattr(clip_result, "prompt_scores", {}) or {}
+        school_score = float(prompt_scores.get("setting_school", 0.0) or 0.0)
+        private_score = float(prompt_scores.get("setting_nonschool_private", 0.0) or 0.0)
+        if school_score < 0.20 and private_score < 0.20:
+            return None
+        if school_score >= 0.28 and school_score >= private_score:
+            return True
+        if private_score >= 0.28 and private_score > school_score:
+            return False
+        return None
+
     @staticmethod
     def _evaluate_custom_hard_rule(
         rule: Dict[str, Any],
@@ -260,6 +456,11 @@ class PolicyEngine:
             if p in (clip_result.prompt_scores or {})
         ]
         if not scores:
+            log.warning(
+                "policy.hard_rule_no_matching_prompts",
+                rule_name=name,
+                prompts=neg_prompts,
+            )
             return None
         avg = sum(scores) / len(scores)
         if avg > threshold:
@@ -298,13 +499,14 @@ class PolicyEngine:
             return None, 0.0
         avg = sum(scores) / len(scores)
         if avg < min_score:
+            penalty = min(max(weight, 0.0), 1.0)
             return PolicyViolation(
                 rule_name=name,
                 severity="soft",
                 description=desc,
                 measured_value=round(avg, 3),
                 threshold=min_score,
-            ), weight
+            ), penalty
         return None, 0.0
 
     # ── Helpers ──────────────────────────────────────────────────────
@@ -314,8 +516,22 @@ class PolicyEngine:
         """Deep-merge user policy on top of DEFAULT_POLICY."""
         merged = dict(DEFAULT_POLICY)
         for key, value in policy.items():
-            if isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
-                merged[key] = {**merged[key], **value}
+            if isinstance(value, list) and isinstance(merged.get(key), list):
+                merged[key] = list(dict.fromkeys([*merged[key], *value]))
+            elif isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
+                merged[key] = PolicyEngine._merge_nested_dicts(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+
+    @staticmethod
+    def _merge_nested_dicts(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
+        merged = dict(base)
+        for key, value in updates.items():
+            if isinstance(value, list) and isinstance(merged.get(key), list):
+                merged[key] = list(dict.fromkeys([*merged[key], *value]))
+            elif isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = PolicyEngine._merge_nested_dicts(merged[key], value)
             else:
                 merged[key] = value
         return merged
@@ -350,11 +566,62 @@ class PolicyEngine:
                 if not isinstance(dc["min_score"], (int, float)) or not (0.0 <= dc["min_score"] <= 1.0):
                     errors.append("dress_code.min_score must be a float between 0.0 and 1.0")
 
+        if "journal_matching" in policy:
+            jm = policy["journal_matching"]
+            if not isinstance(jm, dict):
+                errors.append("journal_matching must be an object")
+            else:
+                t = jm.get("clip_similarity_threshold")
+                if t is not None:
+                    try:
+                        threshold = float(t)
+                        if not (0.0 <= threshold <= 1.0):
+                            errors.append("journal_matching.clip_similarity_threshold must be 0.0-1.0")
+                    except (TypeError, ValueError):
+                        errors.append("journal_matching.clip_similarity_threshold must be numeric")
+
+        if "decision_thresholds" in policy:
+            dt = policy["decision_thresholds"]
+            if not isinstance(dt, dict):
+                errors.append("decision_thresholds must be an object")
+            else:
+                try:
+                    approve = float(dt.get("approve", 0))
+                    review = float(dt.get("review", 0))
+                    reject = float(dt.get("reject", 0))
+                    if not all(0.0 <= v <= 1.0 for v in [approve, review, reject]):
+                        errors.append("decision_thresholds values must be 0.0-1.0")
+                    if approve <= review:
+                        errors.append("decision_thresholds.approve must be greater than review")
+                    if review < reject:
+                        errors.append("decision_thresholds.review must be greater than or equal to reject")
+                except (TypeError, ValueError):
+                    errors.append("decision_thresholds values must be numeric")
+
+        if "scoring_weights" in policy:
+            sw = policy["scoring_weights"]
+            if not isinstance(sw, dict):
+                errors.append("scoring_weights must be an object")
+            else:
+                try:
+                    total = sum(float(v) for v in sw.values())
+                    if not (0.99 <= total <= 1.01):
+                        errors.append(f"scoring_weights must sum to 1.0, got {round(total, 3)}")
+                except (TypeError, ValueError):
+                    errors.append("scoring_weights values must be numeric")
+
         for rule in policy.get("custom_hard_rules", []):
             if "name" not in rule:
                 errors.append("Each custom_hard_rule must have a 'name' field")
             if "clip_negative_prompts" not in rule or not isinstance(rule["clip_negative_prompts"], list):
                 errors.append(f"custom_hard_rule '{rule.get('name', '?')}' must have 'clip_negative_prompts' list")
+            t = rule.get("threshold", 0.5)
+            try:
+                threshold = float(t)
+                if not (0.0 <= threshold <= 1.0):
+                    errors.append(f"Rule '{rule.get('name')}' threshold must be 0.0-1.0")
+            except (TypeError, ValueError):
+                errors.append(f"Rule '{rule.get('name')}' threshold must be numeric")
 
         for rule in policy.get("custom_soft_rules", []):
             if "name" not in rule:

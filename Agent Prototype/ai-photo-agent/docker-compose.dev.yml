@@ -13,7 +13,7 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-photo_agent}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-photo_agent} -d ${POSTGRES_DB:-photo_agent_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -65,11 +65,14 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-photo_agent}:${POSTGRES_PASSWORD:-photo_agent_secret}@postgres:5432/${POSTGRES_DB:-photo_agent_db}
       - REDIS_URL=redis://redis:6379/0
       - MINIO_ENDPOINT=minio:9000
-      - DEVICE=cpu
+      - DEVICE=auto
+      - CLIP_MODEL_NAME=auto
+      - YOLO_MODEL_PATH=auto
+      - YOLO_AUGMENT=false
     volumes:
       - ./backend:/app
       - model_cache_dev:/root/.cache
-      - ./credentials:/app/credentials:ro
+      - ./backend/credentials:/app/credentials:ro
     ports:
       - "8000:8000"   # FastAPI + Swagger UI at /api/docs
     depends_on:
@@ -91,11 +94,14 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-photo_agent}:${POSTGRES_PASSWORD:-photo_agent_secret}@postgres:5432/${POSTGRES_DB:-photo_agent_db}
       - REDIS_URL=redis://redis:6379/0
       - MINIO_ENDPOINT=minio:9000
-      - DEVICE=cpu
+      - DEVICE=auto
+      - CLIP_MODEL_NAME=auto
+      - YOLO_MODEL_PATH=auto
+      - YOLO_AUGMENT=false
     volumes:
       - ./backend:/app
       - model_cache_dev:/root/.cache
-      - ./credentials:/app/credentials:ro
+      - ./backend/credentials:/app/credentials:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -130,6 +136,18 @@ services:
       - "5555:5555"   # Flower task monitor UI
     depends_on:
       - redis
+    restart: unless-stopped
+
+  frontend:
+    image: nginx:alpine
+    container_name: photo_agent_frontend_dev
+    ports:
+      - "3000:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx/journal.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
     restart: unless-stopped
 
 volumes:

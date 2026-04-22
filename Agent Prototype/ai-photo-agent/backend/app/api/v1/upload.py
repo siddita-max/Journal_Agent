@@ -21,9 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.models import (
-    ImageDecision, ImageRecord, PolicyConfig, ProcessingJob, JobStatus, AuditLog
+    ImageDecision, ImageRecord, AuditLog, PolicyConfig
 )
-from app.services.policy_engine import PolicyEngine, DEFAULT_POLICY
+from app.services.policy_engine import PolicyEngine, get_school_child_safety_policy
 from app.services.preprocessing import PreprocessingPipeline
 from app.services.inference_engine import InferenceEngine
 from app.services.scoring_engine import ScoringEngine
@@ -34,7 +34,12 @@ router = APIRouter()
 
 SUPPORTED_TYPES = {
     "image/jpeg", "image/png", "image/webp",
-    "image/bmp", "image/gif", "image/tiff",
+}
+
+DECISION_TO_STATUS = {
+    "approved": "approved",
+    "review": "review",
+    "rejected": "rejected",
 }
 
 # ── Lazy singletons (loaded once per API process) ─────────────────────────
@@ -143,6 +148,15 @@ async def evaluate_image(
     filename = file.filename or f"upload_{uuid.uuid4().hex[:8]}.jpg"
     log.info("upload.received", filename=filename, size=len(image_bytes))
 
+    result = await db.execute(
+        select(PolicyConfig).where(
+            PolicyConfig.name == "school_journal_policy_v1",
+            PolicyConfig.is_active == True,
+        ).limit(1)
+    )
+    stored_policy = result.scalar_one_or_none()
+    active_policy_rules = stored_policy.rules if stored_policy else get_school_child_safety_policy()
+
     # ── Pipeline ──────────────────────────────────────────────────────────
     import asyncio
     loop = asyncio.get_event_loop()
@@ -156,13 +170,17 @@ async def evaluate_image(
         # 2. Step-by-Step Gatekeeper: Skip AI if quality is too low
         inf = None
         if prep.ok:
-            inf = inference_engine.run(image_bytes, filename, user_text=user_text)
+            inf = inference_engine.run(
+                image_bytes,
+                filename,
+                user_text=user_text,
+                yolo_augment=False,
+            )
         else:
             log.info("pipeline.skipping_ai", reason=prep.rejection_reasons)
 
-        # 3. Active policy
-        # (sync fetch — called from executor so blocking is ok)
-        policy_rules = DEFAULT_POLICY
+        # 3. Fixed school/children safety policy
+        policy_rules = active_policy_rules
 
         policy_result = None
         if inf is not None:
@@ -246,15 +264,19 @@ async def evaluate_image(
 
     # ── Response ──────────────────────────────────────────────────────────
     # Focus only on high-level results, hiding all internal ML details
-    status = "approved" if score.decision == "approved" else "rejected"
+    decision = (score.decision or "rejected").lower()
+    status = DECISION_TO_STATUS.get(decision, "rejected")
     reason = None
-    if status == "rejected":
+    if status == "review":
+        reason = "; ".join(score.reasons) or "Image requires manual review"
+    elif status == "rejected":
         # Combine all reasons into a single clean string
-        reason = "; ".join(score.reasons)
+        reason = "; ".join(score.reasons) or "Image rejected by policy"
 
     return {
         "image_id": str(record.id),
         "filename": filename,
+        "decision": decision,
         "status": status,
         "reason": reason,
         "scene_context": {
@@ -262,7 +284,7 @@ async def evaluate_image(
             "students": inf.yolo.student_count if inf else 0,
             "teachers": inf.yolo.teacher_count if inf else 0,
             "activity": inf.clip.detected_activity if inf else "Unknown",
-            "match_score": round(inf.clip.semantic_score * 100, 1) if (inf and user_text) else None
+            "match_score": round(inf.clip.semantic_score * 100, 1) if inf else None
         }
     }
 
@@ -333,9 +355,9 @@ async def evaluate_batch(
 
     summary = {
         "total": len(results),
-        "approved": sum(1 for r in results if r.get("decision") == "approved"),
-        "rejected": sum(1 for r in results if r.get("decision") == "rejected"),
-        "review": sum(1 for r in results if r.get("decision") == "review"),
+        "approved": sum(1 for r in results if (r.get("decision") or r.get("status")) == "approved"),
+        "rejected": sum(1 for r in results if (r.get("decision") or r.get("status")) == "rejected"),
+        "review": sum(1 for r in results if (r.get("decision") or r.get("status")) == "review"),
     }
 
     return {"summary": summary, "results": results}

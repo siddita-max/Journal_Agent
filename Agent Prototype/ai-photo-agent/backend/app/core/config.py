@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         return v
 
     # ── Google Drive ─────────────────────────────────────────────────
-    GOOGLE_SERVICE_ACCOUNT_FILE: str = "/app/credentials/service_account.json"
+    GOOGLE_SERVICE_ACCOUNT_FILE: str = "/app/credentials/photo-agent-494106-23b977507358.json"
     GOOGLE_DRIVE_SCOPES: Union[List[str], str] = ["https://www.googleapis.com/auth/drive.readonly"]
 
     # ── Database ─────────────────────────────────────────────────────
@@ -59,8 +59,9 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
 
     # ── AI Models ────────────────────────────────────────────────────
-    CLIP_MODEL_NAME: str = "ViT-B/32"
-    YOLO_MODEL_PATH: str = "yolov8n.pt"
+    CLIP_MODEL_NAME: str = "ViT-L/14@336px"
+    YOLO_MODEL_PATH: str = "yolov8s.pt"
+    YOLO_AUGMENT: bool = False
     DEVICE: str = "auto"  # auto | cpu | cuda
 
     # ── Scoring Thresholds ───────────────────────────────────────────
@@ -68,11 +69,11 @@ class Settings(BaseSettings):
     SCORE_REVIEW_THRESHOLD: float = 0.60
 
     # ── Preprocessing Limits ─────────────────────────────────────────
-    MIN_RESOLUTION_WIDTH: int = 400
-    MIN_RESOLUTION_HEIGHT: int = 400
-    MIN_BLUR_VARIANCE: float = 100.0
-    MIN_BRIGHTNESS: int = 30
-    MAX_BRIGHTNESS: int = 240
+    MIN_RESOLUTION_WIDTH: int = 1280
+    MIN_RESOLUTION_HEIGHT: int = 720
+    MIN_BLUR_VARIANCE: float = 120.0
+    MIN_BRIGHTNESS: int = 40
+    MAX_BRIGHTNESS: int = 220
     MIN_ASPECT_RATIO: float = 0.5
     MAX_ASPECT_RATIO: float = 3.0
 
@@ -84,9 +85,6 @@ class Settings(BaseSettings):
     WEIGHT_AESTHETIC: float = 0.10
 
     # ── YOLO Policy ──────────────────────────────────────────────────
-    MAX_PEOPLE_IN_PHOTO: int = 10
-    REJECT_IF_PHONE_DETECTED: bool = True
-
     def get_device(self) -> str:
         if self.DEVICE == "auto":
             try:
@@ -95,6 +93,18 @@ class Settings(BaseSettings):
             except ImportError:
                 return "cpu"
         return self.DEVICE
+
+    def get_clip_model_name(self) -> str:
+        value = (self.CLIP_MODEL_NAME or "").strip()
+        if value.lower() != "auto":
+            return value
+        return "ViT-L/14@336px" if self.get_device() == "cuda" else "ViT-B/32"
+
+    def get_yolo_model_path(self) -> str:
+        value = (self.YOLO_MODEL_PATH or "").strip()
+        if value.lower() != "auto":
+            return value
+        return "/app/models/yolov8s.pt" if self.get_device() == "cuda" else "/app/models/yolov8n.pt"
 
 
 @lru_cache()

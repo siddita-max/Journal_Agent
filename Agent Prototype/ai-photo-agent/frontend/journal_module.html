@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>School Journal</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Lexend:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+      rel="stylesheet"
+    />
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "tertiary-container": "#697573",
+              "on-primary": "#ffffff",
+              "tertiary-fixed": "#d8e5e2",
+              "on-secondary": "#ffffff",
+              outline: "#6e7979",
+              "on-tertiary-fixed": "#121e1c",
+              background: "#f9f9ff",
+              error: "#ba1a1a",
+              "primary-fixed": "#93f2f2",
+              "primary-fixed-dim": "#76d6d5",
+              "surface-container-lowest": "#ffffff",
+              "on-surface-variant": "#3e4949",
+              "on-primary-fixed": "#002020",
+              "surface-bright": "#f9f9ff",
+              "surface-container-high": "#dee8ff",
+              "outline-variant": "#bdc9c8",
+              "on-tertiary-fixed-variant": "#3d4947",
+              "on-primary-fixed-variant": "#004f4f",
+              "on-surface": "#111c2d",
+              "error-container": "#ffdad6",
+              "tertiary-fixed-dim": "#bcc9c6",
+              primary: "#006565",
+              "surface-dim": "#cfdaf2",
+              "on-secondary-fixed": "#001f25",
+              "surface-container-highest": "#d8e3fb",
+              "secondary-container": "#3fe1fd",
+              "surface-variant": "#d8e3fb",
+              "on-tertiary-container": "#effcf9",
+              secondary: "#006877",
+              "inverse-surface": "#263143",
+              "on-primary-container": "#e3fffe",
+              "surface-container-low": "#f0f3ff",
+              "surface-container": "#e7eeff",
+              "on-secondary-container": "#00616f",
+              "inverse-primary": "#76d6d5",
+              "on-tertiary": "#ffffff",
+              "primary-container": "#008080",
+              "on-secondary-fixed-variant": "#004e5a",
+              "inverse-on-surface": "#ecf1ff",
+              "secondary-fixed-dim": "#2fd9f4",
+              "on-error-container": "#93000a",
+              surface: "#f9f9ff",
+              tertiary: "#505c5b",
+              "on-background": "#111c2d",
+              "surface-tint": "#006a6a",
+              "secondary-fixed": "#a2eeff",
+              "on-error": "#ffffff",
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px",
+            },
+            spacing: {
+              unit: "4px",
+              "container-max": "1280px",
+              margin: "auto",
+              gutter: "24px",
+              "section-padding": "80px",
+            },
+            fontFamily: {
+              "display-xl": ["Space Grotesk"],
+              "body-md": ["Lexend"],
+              "headline-md": ["Space Grotesk"],
+              "headline-lg": ["Space Grotesk"],
+              "label-caps": ["Lexend"],
+              "body-lg": ["Lexend"],
+            },
+            fontSize: {
+              "display-xl": [
+                "4.5rem",
+                { lineHeight: "1.1", letterSpacing: "-0.02em", fontWeight: "700" },
+              ],
+              "body-md": ["1rem", { lineHeight: "1.5", fontWeight: "400" }],
+              "headline-md": ["2.25rem", { lineHeight: "1.3", fontWeight: "500" }],
+              "headline-lg": ["3rem", { lineHeight: "1.2", fontWeight: "600" }],
+              "label-caps": [
+                "0.875rem",
+                { lineHeight: "1.4", letterSpacing: "0.05em", fontWeight: "600" },
+              ],
+              "body-lg": ["1.125rem", { lineHeight: "1.6", fontWeight: "400" }],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      .material-symbols-outlined {
+        font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+      }
+      body {
+        font-family: "Lexend", sans-serif;
+        overflow: hidden;
+        height: 100vh;
+      }
+      .glass-card {
+        background: rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(0, 128, 128, 0.1);
+      }
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #00808033;
+        border-radius: 10px;
+      }
+      .drop-active {
+        border-color: rgba(0, 128, 128, 0.85) !important;
+        background: rgba(0, 128, 128, 0.06) !important;
+      }
+    </style>
+  </head>
+  <body class="bg-background text-on-surface">
+    <!-- Top Navigation Shell -->
+    <header
+      class="bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-b border-teal-100/50 dark:border-teal-900/50 shadow-[0_4px_20px_rgba(0,128,128,0.05)] docked full-width top-0 sticky z-50"
+    >
+      <div class="flex items-center w-full px-8 py-3 max-w-screen-2xl mx-auto">
+        <nav class="hidden md:flex gap-6 font-['Space_Grotesk'] font-medium text-sm tracking-tight">
+          <a class="text-teal-700 dark:text-teal-300 border-b-2 border-teal-600 pb-1" href="#">Journal</a>
+        </nav>
+      </div>
+    </header>
+
+    <!-- Hero Strip -->
+    <section class="w-full h-20 relative overflow-hidden">
+      <img
+        class="absolute inset-0 w-full h-full object-cover blur-[2px] opacity-40"
+        alt="banner"
+        src="https://lh3.googleusercontent.com/aida-public/AB6AXuB6PWlmckLWWHQXYQ7O3BwutB3Y1fjUesX_L_gB0O8sXW9gGjOpA7snRr4kS-w-ViqpRI84nmHyN9M5Ug68EMHzn0ECMJ-BPLUaHhTk0FTXL8rwvxpXne1v9fNhjS9LNAI3B0pztFH0CsfZ7l4SYjXM2iGnLQ5ceBSFxGnY-oUMDmTSZaHRZD-0QkmticE8fzJS6loXgFgQW1BNyrmqwf_yPMyzMGBXAvh8wbdgsOaE7h7m1pRVa7WCIgiesogUd7OZYn4PepztOws"
+      />
+      <div class="absolute inset-0 bg-gradient-to-r from-primary-container/20 to-transparent"></div>
+      <div class="relative h-full flex items-center px-8 max-w-screen-2xl mx-auto">
+        <h1 class="font-headline-md text-headline-md text-primary tracking-tight">Journal Operations Module</h1>
+      </div>
+    </section>
+
+    <main class="max-w-screen-2xl mx-auto px-8 py-6 h-[calc(100vh-180px)] flex flex-col gap-6">
+      <div class="grid grid-cols-12 gap-6 flex-1 overflow-hidden">
+        <!-- Left Column: Upload & Inputs -->
+        <div class="col-span-12 lg:col-span-8 flex flex-col gap-6 overflow-hidden">
+          <div
+            class="bg-surface-container-lowest p-6 rounded-xl border border-teal-100/50 shadow-[0_20px_40px_rgba(0,128,128,0.08)] flex-1 flex flex-col"
+          >
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="font-headline-md text-lg text-primary">Media Upload</h2>
+              <span class="text-xs font-label-caps uppercase text-teal-600 bg-teal-50 px-2 py-1 rounded"
+                >Daily Batch</span
+              >
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-6">
+              <div class="flex flex-col gap-2">
+                <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider" for="journalTitle"
+                  >Journal Title</label
+                >
+                <input
+                  id="journalTitle"
+                  class="w-full bg-slate-50 border-0 border-b border-teal-100 focus:ring-0 focus:border-primary transition-all rounded-t-lg font-body-md text-sm py-2 px-3"
+                  placeholder="e.g., Robotics Workshop - Phase 2"
+                  type="text"
+                />
+              </div>
+              <div class="flex flex-col gap-2">
+                <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider" for="driveUrl"
+                  >Drive Folder URL</label
+                >
+                <input
+                  id="driveUrl"
+                  class="w-full bg-slate-50 border-0 border-b border-teal-100 focus:ring-0 focus:border-primary transition-all rounded-t-lg font-body-md text-sm py-2 px-3"
+                  placeholder="https://drive.google.com/..."
+                  type="text"
+                />
+              </div>
+            </div>
+
+            <input id="fileInput" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" multiple hidden />
+
+            <!-- Drag & Drop -->
+            <div
+              id="dropzone"
+              class="flex-1 border-2 border-dashed border-teal-200 rounded-xl bg-teal-50/20 flex flex-col items-center justify-center gap-4 transition-all hover:bg-teal-50/40 hover:border-teal-400 group relative"
+            >
+              <div class="bg-white p-4 rounded-full shadow-sm text-primary-container">
+                <span class="material-symbols-outlined text-4xl">cloud_upload</span>
+              </div>
+              <div class="text-center">
+                <p class="font-body-lg text-slate-600">Drag and drop photos here</p>
+                <p class="text-xs text-slate-400 mt-1">PNG, JPG, WEBP up to 20MB</p>
+              </div>
+              <div class="flex gap-3">
+                <button
+                  id="btnSelectPhotos"
+                  class="px-6 py-2 bg-primary-container text-on-primary rounded-lg font-['Space_Grotesk'] text-sm font-semibold hover:bg-primary transition-all shadow-md active:scale-95"
+                  type="button"
+                >
+                  Select Photos
+                </button>
+                <button
+                  id="btnUseDrive"
+                  class="px-6 py-2 border border-teal-600 text-teal-700 rounded-lg font-['Space_Grotesk'] text-sm font-semibold hover:bg-teal-50 transition-all active:scale-95 flex items-center gap-2"
+                  type="button"
+                >
+                  <span class="material-symbols-outlined text-sm">folder_open</span>
+                  Use Drive Folder
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Validation & Results -->
+          <div class="grid grid-cols-3 gap-4">
+            <div id="cardSuccess" class="bg-teal-50 border border-teal-100 p-4 rounded-lg flex items-start gap-3 hidden">
+              <span class="material-symbols-outlined text-teal-600">check_circle</span>
+              <div>
+                <p id="successTitle" class="text-sm font-semibold text-teal-800">Ready</p>
+                <p id="successMsg" class="text-[10px] text-teal-600/80 leading-tight">.</p>
+              </div>
+            </div>
+            <div id="cardWarn" class="bg-amber-50 border border-amber-100 p-4 rounded-lg flex items-start gap-3 hidden">
+              <span class="material-symbols-outlined text-amber-600">warning</span>
+              <div>
+                <p id="warnTitle" class="text-sm font-semibold text-amber-800">Attention</p>
+                <p id="warnMsg" class="text-[10px] text-amber-600/80 leading-tight">.</p>
+              </div>
+            </div>
+            <div id="cardError" class="bg-red-50 border border-red-100 p-4 rounded-lg flex items-start gap-3 hidden">
+              <span class="material-symbols-outlined text-red-600">error</span>
+              <div>
+                <p id="errorTitle" class="text-sm font-semibold text-red-800">Error</p>
+                <p id="errorMsg" class="text-[10px] text-red-600/80 leading-tight">.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column: Status & Activity -->
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-6 overflow-hidden">
+          <!-- Status Panel -->
+          <div
+            class="bg-surface-container-lowest p-6 rounded-xl border border-teal-100/50 shadow-[0_20px_40px_rgba(0,128,128,0.08)] flex flex-col max-h-[60%]"
+          >
+            <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">File Validation</h3>
+            <div class="overflow-y-auto custom-scrollbar flex-1 pr-2">
+              <div id="fileList" class="space-y-3"></div>
+            </div>
+            <div id="jobProgressSection" class="hidden mt-4 pt-4 border-t border-teal-50">
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Job Progress</p>
+                <p id="jobProgressLabel" class="text-[11px] font-bold text-teal-700">0 / 0</p>
+              </div>
+              <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div id="jobProgressBar" class="h-full bg-teal-500 transition-all duration-300" style="width: 0%"></div>
+              </div>
+              <p id="jobStatusText" class="text-[10px] text-slate-500 mt-2">Waiting to start...</p>
+              <div class="grid grid-cols-3 gap-2 mt-3">
+                <div class="bg-teal-50 border border-teal-100 rounded p-2">
+                  <p class="text-[9px] uppercase font-semibold text-teal-700">Selected</p>
+                  <p id="approvedCountLive" class="text-sm font-bold text-teal-800">0</p>
+                </div>
+                <div class="bg-amber-50 border border-amber-100 rounded p-2">
+                  <p class="text-[9px] uppercase font-semibold text-amber-700">Review</p>
+                  <p id="reviewCountLive" class="text-sm font-bold text-amber-800">0</p>
+                </div>
+                <div class="bg-red-50 border border-red-100 rounded p-2">
+                  <p class="text-[9px] uppercase font-semibold text-red-700">Rejected</p>
+                  <p id="rejectedCountLive" class="text-sm font-bold text-red-800">0</p>
+                </div>
+              </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-teal-50 flex flex-col gap-3">
+              <button
+                id="btnSubmit"
+                class="w-full py-2.5 bg-primary-container text-on-primary rounded-lg font-['Space_Grotesk'] font-bold text-sm shadow-lg hover:shadow-teal-900/20 active:scale-95 transition-all"
+                type="button"
+              >
+                Submit Journal
+              </button>
+              <div class="flex gap-2">
+                <button
+                  id="btnClear"
+                  class="flex-1 py-2 border border-teal-200 text-teal-700 rounded-lg text-xs font-bold hover:bg-teal-50 transition-all"
+                  type="button"
+                >
+                  Clear All
+                </button>
+                <button
+                  id="btnRefresh"
+                  class="flex-1 py-2 border border-teal-200 text-teal-700 rounded-lg text-xs font-bold hover:bg-teal-50 transition-all flex items-center justify-center gap-1"
+                  type="button"
+                >
+                  <span class="material-symbols-outlined text-sm">refresh</span>
+                  Refresh
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-surface-container-lowest p-4 rounded-xl border border-teal-100/50 shadow-[0_10px_20px_rgba(0,128,128,0.06)] flex flex-col gap-3 max-h-[38%]">
+            <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-widest">Live Decisions</h3>
+            <div class="grid grid-cols-3 gap-3 overflow-hidden">
+              <div class="min-w-0">
+                <p class="text-[10px] font-bold text-teal-700 uppercase mb-1">Selected</p>
+                <div id="approvedList" class="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pr-1"></div>
+              </div>
+              <div class="min-w-0">
+                <p class="text-[10px] font-bold text-amber-700 uppercase mb-1">Review</p>
+                <div id="reviewList" class="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pr-1"></div>
+              </div>
+              <div class="min-w-0">
+                <p class="text-[10px] font-bold text-red-700 uppercase mb-1">Rejected</p>
+                <div id="rejectedList" class="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pr-1"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Activity List -->
+          <div class="bg-white/40 p-5 rounded-xl border border-teal-100/30 flex-1 flex flex-col overflow-hidden">
+            <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">Recent Activity</h3>
+            <div class="flex-1 overflow-y-auto custom-scrollbar pr-2">
+              <ul id="activityList" class="space-y-4"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Minimal Footer -->
+    <footer class="w-full py-6 mt-auto border-t border-teal-100 dark:border-teal-900 bg-slate-50 dark:bg-slate-950">
+      <div
+        class="flex flex-row justify-between items-center px-12 max-w-screen-2xl mx-auto font-['Space_Grotesk'] text-xs uppercase tracking-widest text-slate-400 dark:text-slate-500"
+      >
+        <div class="flex gap-4">
+          <span id="lastUpdated">Last updated: -</span>
+          <span id="sysStatus" class="text-teal-600 font-bold">• System: -</span>
+        </div>
+        <div>© 2024 School Journal</div>
+        <div class="flex gap-6">
+          <a class="hover:text-teal-500 transition-colors" href="#" id="btnDocs">Documentation</a>
+          <a class="hover:text-teal-500 transition-colors" href="#" id="btnSupport">Support</a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      (function () {
+        const qs = new URLSearchParams(location.search);
+        const API_BASE = (qs.get("api") || "").replace(/\/+$/, "");
+
+        const els = {
+          journalTitle: document.getElementById("journalTitle"),
+          driveUrl: document.getElementById("driveUrl"),
+          fileInput: document.getElementById("fileInput"),
+          dropzone: document.getElementById("dropzone"),
+          fileList: document.getElementById("fileList"),
+          jobProgressSection: document.getElementById("jobProgressSection"),
+          jobProgressLabel: document.getElementById("jobProgressLabel"),
+          jobProgressBar: document.getElementById("jobProgressBar"),
+          jobStatusText: document.getElementById("jobStatusText"),
+          approvedCountLive: document.getElementById("approvedCountLive"),
+          reviewCountLive: document.getElementById("reviewCountLive"),
+          rejectedCountLive: document.getElementById("rejectedCountLive"),
+          approvedList: document.getElementById("approvedList"),
+          reviewList: document.getElementById("reviewList"),
+          rejectedList: document.getElementById("rejectedList"),
+          activityList: document.getElementById("activityList"),
+          lastUpdated: document.getElementById("lastUpdated"),
+          sysStatus: document.getElementById("sysStatus"),
+          btnSelectPhotos: document.getElementById("btnSelectPhotos"),
+          btnUseDrive: document.getElementById("btnUseDrive"),
+          btnSubmit: document.getElementById("btnSubmit"),
+          btnClear: document.getElementById("btnClear"),
+          btnRefresh: document.getElementById("btnRefresh"),
+          cardSuccess: document.getElementById("cardSuccess"),
+          cardWarn: document.getElementById("cardWarn"),
+          cardError: document.getElementById("cardError"),
+          successTitle: document.getElementById("successTitle"),
+          successMsg: document.getElementById("successMsg"),
+          warnTitle: document.getElementById("warnTitle"),
+          warnMsg: document.getElementById("warnMsg"),
+          errorTitle: document.getElementById("errorTitle"),
+          errorMsg: document.getElementById("errorMsg"),
+        };
+
+        const state = {
+          files: [],
+          driveJob: null,
+          busy: false,
+          lastLiveRefreshMs: 0,
+        };
+
+        function nowLabel() {
+          const d = new Date();
+          const hh = String(d.getHours()).padStart(2, "0");
+          const mm = String(d.getMinutes()).padStart(2, "0");
+          return `${hh}:${mm}`;
+        }
+
+        function setBusy(b) {
+          state.busy = b;
+          const disabled = !!b;
+          [els.btnSelectPhotos, els.btnUseDrive, els.btnSubmit, els.btnClear, els.btnRefresh].forEach((btn) => {
+            btn.disabled = disabled;
+            btn.classList.toggle("opacity-60", disabled);
+            btn.classList.toggle("cursor-not-allowed", disabled);
+          });
+        }
+
+        function showCard(kind, title, msg) {
+          els.cardSuccess.classList.add("hidden");
+          els.cardWarn.classList.add("hidden");
+          els.cardError.classList.add("hidden");
+          if (kind === "success") {
+            els.successTitle.textContent = title || "Ready";
+            els.successMsg.textContent = msg || "";
+            els.cardSuccess.classList.remove("hidden");
+          } else if (kind === "warn") {
+            els.warnTitle.textContent = title || "Attention";
+            els.warnMsg.textContent = msg || "";
+            els.cardWarn.classList.remove("hidden");
+          } else if (kind === "error") {
+            els.errorTitle.textContent = title || "Error";
+            els.errorMsg.textContent = msg || "";
+            els.cardError.classList.remove("hidden");
+          }
+        }
+
+        function addActivity(text, status, colorClass) {
+          const li = document.createElement("li");
+          li.className = "flex items-start gap-3 relative";
+          const dot = document.createElement("div");
+          dot.className = `w-2 h-2 rounded-full ${colorClass} mt-1.5 shrink-0`;
+          const wrap = document.createElement("div");
+          const p = document.createElement("p");
+          p.className = "text-xs text-slate-700 font-medium";
+          p.textContent = text;
+          const meta = document.createElement("div");
+          meta.className = "flex items-center gap-2 mt-1";
+          const t = document.createElement("span");
+          t.className = "text-[10px] text-slate-400";
+          t.textContent = nowLabel();
+          const s = document.createElement("span");
+          s.className = `text-[10px] font-bold ${status === "SUCCESS" ? "text-teal-600" : status === "ERROR" ? "text-red-500" : "text-slate-400"}`;
+          s.textContent = status;
+          meta.appendChild(t);
+          meta.appendChild(s);
+          wrap.appendChild(p);
+          wrap.appendChild(meta);
+          li.appendChild(dot);
+          li.appendChild(wrap);
+          els.activityList.prepend(li);
+        }
+
+        function bytesToMb(n) {
+          if (!Number.isFinite(n)) return "-";
+          return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+        }
+
+        function isToday(dateObj) {
+          const d = new Date(dateObj);
+          const now = new Date();
+          return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+        }
+
+        function renderFiles() {
+          els.fileList.innerHTML = "";
+          if (!state.files.length) {
+            const empty = document.createElement("div");
+            empty.className = "text-xs text-slate-400";
+            empty.textContent = "No files selected";
+            els.fileList.appendChild(empty);
+            return;
+          }
+
+          let wrongDateCount = 0;
+          for (const f of state.files) {
+            const okDate = isToday(f.lastModified);
+            if (!okDate) wrongDateCount++;
+
+            const row = document.createElement("div");
+            row.className =
+              "flex items-center justify-between p-2 rounded-lg " +
+              (okDate ? "bg-slate-50 border border-slate-100" : "bg-red-50/50 border border-red-100");
+
+            const left = document.createElement("div");
+            left.className = "flex items-center gap-3 overflow-hidden";
+            const icon = document.createElement("span");
+            icon.className = "material-symbols-outlined text-lg " + (okDate ? "text-teal-500" : "text-red-500");
+            icon.textContent = okDate ? "image" : "history";
+            const meta = document.createElement("div");
+            meta.className = "truncate";
+            const name = document.createElement("p");
+            name.className = "text-xs font-medium truncate " + (okDate ? "text-slate-700" : "text-red-700");
+            name.textContent = f.name;
+            const sub = document.createElement("p");
+            sub.className = "text-[10px] " + (okDate ? "text-slate-400" : "text-red-400");
+            const dt = new Date(f.lastModified);
+            sub.textContent = `${dt.toLocaleDateString()} • ${bytesToMb(f.size)}`;
+            meta.appendChild(name);
+            meta.appendChild(sub);
+            left.appendChild(icon);
+            left.appendChild(meta);
+
+            const chip = document.createElement("span");
+            chip.className =
+              "text-[10px] px-2 py-0.5 rounded-full font-bold " +
+              (okDate ? "bg-teal-100 text-teal-700" : "bg-red-100 text-red-700");
+            chip.textContent = okDate ? "READY" : "WRONG DATE";
+
+            row.appendChild(left);
+            row.appendChild(chip);
+            els.fileList.appendChild(row);
+          }
+
+          if (wrongDateCount > 0) {
+            showCard("error", "Upload blocked", "Only today's photos can be submitted.");
+          } else {
+            showCard("success", "Photos ready", `${state.files.length} file(s) ready.`);
+          }
+        }
+
+        function renderDecisionMiniList(container, images, tone) {
+          container.innerHTML = "";
+          if (!images || !images.length) {
+            const empty = document.createElement("div");
+            empty.className = "text-[10px] text-slate-400";
+            empty.textContent = "-";
+            container.appendChild(empty);
+            return;
+          }
+          for (const img of images) {
+            const row = document.createElement("div");
+            row.className =
+              "text-[10px] px-2 py-1 rounded border truncate " +
+              (tone === "approved"
+                ? "bg-teal-50 border-teal-100 text-teal-800"
+                : tone === "review"
+                  ? "bg-amber-50 border-amber-100 text-amber-800"
+                  : "bg-red-50 border-red-100 text-red-800");
+            row.textContent = img.filename || "unknown";
+            container.appendChild(row);
+          }
+        }
+
+        function resetLiveJobPanels() {
+          els.jobProgressSection.classList.add("hidden");
+          els.jobProgressLabel.textContent = "0 / 0";
+          els.jobProgressBar.style.width = "0%";
+          els.jobStatusText.textContent = "Waiting to start...";
+          els.approvedCountLive.textContent = "0";
+          els.reviewCountLive.textContent = "0";
+          els.rejectedCountLive.textContent = "0";
+          renderDecisionMiniList(els.approvedList, [], "approved");
+          renderDecisionMiniList(els.reviewList, [], "review");
+          renderDecisionMiniList(els.rejectedList, [], "rejected");
+        }
+
+        function updateProgressUI(job) {
+          els.jobProgressSection.classList.remove("hidden");
+          const total = Number(job && job.total_images ? job.total_images : 0);
+          const processed = Number(job && job.processed_images ? job.processed_images : 0);
+          const approved = Number(job && job.approved_count ? job.approved_count : 0);
+          const review = Number(job && job.review_count ? job.review_count : 0);
+          const rejected = Number(job && job.rejected_count ? job.rejected_count : 0);
+          const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+
+          els.jobProgressLabel.textContent = `${processed} / ${total}`;
+          els.jobProgressBar.style.width = `${pct}%`;
+          els.jobStatusText.textContent = `Status: ${(job && job.status ? job.status : "pending").toUpperCase()} • ${pct}%`;
+          els.approvedCountLive.textContent = String(approved);
+          els.reviewCountLive.textContent = String(review);
+          els.rejectedCountLive.textContent = String(rejected);
+        }
+
+        async function parseApiError(resp) {
+          let body = null;
+          try {
+            body = await resp.json();
+          } catch (_) {
+            // ignore
+          }
+          const detail = body && typeof body.detail === "string" ? body.detail : null;
+          return detail || `${resp.status} ${resp.statusText}`;
+        }
+
+        function friendlyNetError(err) {
+          const msg = err && err.message ? String(err.message) : String(err);
+          if (/failed to fetch/i.test(msg)) {
+            return (
+              "Network blocked (likely CORS). Open this page via http://localhost:3000/journal_module.html " +
+              "(do not use file://). Also confirm the API is running at " +
+              API_BASE +
+              "."
+            );
+          }
+          return msg;
+        }
+
+        async function fetchJson(path, options) {
+          const base = API_BASE;
+          const url = `${base}${path}`;
+          const resp = await fetch(url, options);
+          if (!resp.ok) throw new Error(await parseApiError(resp));
+          return await resp.json();
+        }
+
+        async function apiGet(path) {
+          return await fetchJson(path, { method: "GET" });
+        }
+
+        async function apiPostJson(path, payload) {
+          return await fetchJson(path, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        }
+
+        async function uploadSingle(file, userText) {
+          const form = new FormData();
+          form.append("file", file, file.name);
+          if (userText) form.append("user_text", userText);
+
+          return await fetchJson("/api/v1/upload/evaluate", { method: "POST", body: form });
+        }
+
+        async function uploadBatch(files, userText) {
+          const form = new FormData();
+          for (const f of files) form.append("files", f, f.name);
+          if (userText) form.append("user_text", userText);
+
+          return await fetchJson("/api/v1/upload/evaluate-batch", { method: "POST", body: form });
+        }
+
+        async function pollJob(jobId) {
+          const start = Date.now();
+          state.lastLiveRefreshMs = 0;
+          while (Date.now() - start < 5 * 60 * 1000) {
+            const job = await apiGet(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
+            state.driveJob = job;
+            updateProgressUI(job);
+
+            const now = Date.now();
+            if (now - state.lastLiveRefreshMs > 2500) {
+              state.lastLiveRefreshMs = now;
+              try {
+                const [approved, review, rejected] = await Promise.all([
+                  loadJobImages(jobId, "approved"),
+                  loadJobImages(jobId, "review"),
+                  loadJobImages(jobId, "rejected"),
+                ]);
+                renderDecisionMiniList(els.approvedList, approved, "approved");
+                renderDecisionMiniList(els.reviewList, review, "review");
+                renderDecisionMiniList(els.rejectedList, rejected, "rejected");
+              } catch (_) {
+                // ignore live preview hiccups while polling
+              }
+            }
+
+            if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return job;
+            await new Promise((r) => setTimeout(r, 1500));
+          }
+          throw new Error("Job polling timeout.");
+        }
+
+        async function loadJobStats(jobId) {
+          return await apiGet(`/api/v1/images/stats?job_id=${encodeURIComponent(jobId)}`);
+        }
+
+        async function loadJobImages(jobId, decision) {
+          // Keep it light: first page only.
+          let path = `/api/v1/images/?job_id=${encodeURIComponent(jobId)}&limit=8&offset=0`;
+          if (decision) path += `&decision=${encodeURIComponent(decision)}`;
+          return await apiGet(path);
+        }
+
+        async function openJobReport(jobId) {
+          const res = await apiGet(`/api/v1/jobs/${encodeURIComponent(jobId)}/report`);
+          const url = res && res.report_url ? res.report_url : null;
+          if (!url) throw new Error("Report URL not available.");
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
+
+        function renderJobImagesAsList(images) {
+          // Reuse the right-side list to show results (still simple, no internals).
+          els.fileList.innerHTML = "";
+          if (!images || !images.length) {
+            const empty = document.createElement("div");
+            empty.className = "text-xs text-slate-400";
+            empty.textContent = "No results yet";
+            els.fileList.appendChild(empty);
+            return;
+          }
+          for (const img of images) {
+            const decision = (img.decision || "pending").toLowerCase();
+            const ok = decision === "approved";
+            const isReview = decision === "review";
+            const row = document.createElement("div");
+            row.className =
+              "flex items-center justify-between p-2 rounded-lg " +
+              (ok ? "bg-slate-50 border border-slate-100" : isReview ? "bg-amber-50/60 border border-amber-100" : "bg-red-50/50 border border-red-100");
+
+            const left = document.createElement("div");
+            left.className = "flex items-center gap-3 overflow-hidden";
+            const icon = document.createElement("span");
+            icon.className =
+              "material-symbols-outlined text-lg " + (ok ? "text-teal-500" : isReview ? "text-amber-600" : "text-red-500");
+            icon.textContent = "image";
+            const meta = document.createElement("div");
+            meta.className = "truncate";
+            const name = document.createElement("p");
+            name.className = "text-xs font-medium truncate " + (ok ? "text-slate-700" : isReview ? "text-amber-800" : "text-red-700");
+            name.textContent = img.filename || "unknown";
+            const sub = document.createElement("p");
+            sub.className = "text-[10px] text-slate-400";
+            sub.textContent = img.processed_at ? new Date(img.processed_at).toLocaleString() : "";
+            meta.appendChild(name);
+            meta.appendChild(sub);
+            left.appendChild(icon);
+            left.appendChild(meta);
+
+            const chip = document.createElement("span");
+            chip.className =
+              "text-[10px] px-2 py-0.5 rounded-full font-bold " +
+              (ok ? "bg-teal-100 text-teal-700" : isReview ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-700");
+            chip.textContent = decision.toUpperCase();
+            row.appendChild(left);
+            row.appendChild(chip);
+            els.fileList.appendChild(row);
+          }
+        }
+
+        function pickFiles(fileList) {
+          const files = Array.from(fileList || []);
+          state.files = files.filter((f) => {
+            const typeOk = ["image/jpeg", "image/png", "image/webp"].includes(f.type);
+            const name = (f.name || "").toLowerCase();
+            const extOk = name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".webp");
+            return typeOk || extOk;
+          });
+          renderFiles();
+        }
+
+        function clearAll() {
+          state.files = [];
+          state.driveJob = null;
+          state.lastLiveRefreshMs = 0;
+          els.driveUrl.value = "";
+          els.journalTitle.value = "";
+          els.fileInput.value = "";
+          els.fileList.innerHTML = "";
+          els.activityList.innerHTML = "";
+          resetLiveJobPanels();
+          showCard("warn", "Ready", "Select photos or use a Drive folder.");
+          renderFiles();
+        }
+
+        async function refreshSystem() {
+          try {
+            const live = await apiGet("/api/v1/health/live");
+            els.sysStatus.textContent = `• System: ${live.status === "ok" ? "Ready" : "Unknown"}`;
+            els.sysStatus.className = "text-teal-600 font-bold";
+          } catch (e) {
+            els.sysStatus.textContent = "• System: Error";
+            els.sysStatus.className = "text-red-600 font-bold";
+            showCard("error", "Connection error", friendlyNetError(e));
+          } finally {
+            els.lastUpdated.textContent = `Last updated: ${nowLabel()}`;
+          }
+        }
+
+        async function submit() {
+          if (state.busy) return;
+          const title = (els.journalTitle.value || "").trim();
+          const driveUrl = (els.driveUrl.value || "").trim();
+
+          // Client-side today check for local files (Drive has server-side strict rule).
+          const wrong = state.files.some((f) => !isToday(f.lastModified));
+          if (wrong) {
+            showCard("error", "Upload blocked", "Only today's photos can be submitted.");
+            addActivity("Submission blocked (wrong date)", "ERROR", "bg-red-400");
+            return;
+          }
+
+          setBusy(true);
+          try {
+            if (driveUrl) {
+              resetLiveJobPanels();
+              showCard("warn", "Submitting", "Drive folder validation and job creation...");
+              const job = await apiPostJson("/api/v1/jobs/", { drive_folder_url: driveUrl });
+              addActivity(`Drive job created (${job.id})`, "SUCCESS", "bg-teal-500");
+              showCard("warn", "Processing", "Drive job running...");
+              const finalJob = await pollJob(job.id);
+              if (finalJob.status === "completed") {
+                // Prefer stats endpoint (source of truth for UI counts).
+                try {
+                  const stats = await loadJobStats(finalJob.id);
+                  const d = (stats && stats.decisions) ? stats.decisions : {};
+                  const approved = d.approved ? d.approved.count : finalJob.approved_count;
+                  const review = d.review ? d.review.count : finalJob.review_count;
+                  const rejected = d.rejected ? d.rejected.count : finalJob.rejected_count;
+                  showCard("success", "Completed", `Approved: ${approved} • Review: ${review} • Rejected: ${rejected}`);
+                } catch (_) {
+                  showCard("success", "Completed", `Approved: ${finalJob.approved_count} • Review: ${finalJob.review_count} • Rejected: ${finalJob.rejected_count}`);
+                }
+                addActivity(`Drive job completed (${finalJob.id})`, "SUCCESS", "bg-teal-500");
+                try {
+                  const [approved, review, rejected] = await Promise.all([
+                    loadJobImages(finalJob.id, "approved"),
+                    loadJobImages(finalJob.id, "review"),
+                    loadJobImages(finalJob.id, "rejected"),
+                  ]);
+                  renderDecisionMiniList(els.approvedList, approved, "approved");
+                  renderDecisionMiniList(els.reviewList, review, "review");
+                  renderDecisionMiniList(els.rejectedList, rejected, "rejected");
+                } catch (_) {
+                  // ignore UI enrichment failures
+                }
+              } else {
+                const msg = finalJob.error_message || `Job status: ${finalJob.status}`;
+                showCard("error", "Job failed", msg);
+                addActivity(`Drive job failed (${finalJob.id})`, "ERROR", "bg-red-400");
+              }
+              return;
+            }
+
+            if (!state.files.length) {
+              showCard("error", "Nothing to submit", "Select photos or provide a Drive folder URL.");
+              addActivity("Submission failed (no input)", "ERROR", "bg-red-400");
+              return;
+            }
+
+            if (state.files.length === 1) {
+              showCard("warn", "Submitting", "Uploading 1 file...");
+              const res = await uploadSingle(state.files[0], title || undefined);
+              if (res && res.decision) {
+                showCard("success", "Submitted", `Decision: ${res.decision}`);
+              } else {
+                showCard("success", "Submitted", "Upload complete.");
+              }
+              addActivity(`Uploaded 1 file (${state.files[0].name})`, "SUCCESS", "bg-teal-500");
+              return;
+            }
+
+            // The batch endpoint requires 5..20 images.
+            if (state.files.length < 5) {
+              showCard("error", "Batch requires 5+", "Select at least 5 images for batch submission.");
+              addActivity("Batch blocked (<5 images)", "ERROR", "bg-red-400");
+              return;
+            }
+            if (state.files.length > 20) {
+              showCard("error", "Batch max 20", "Select 20 or fewer images.");
+              addActivity("Batch blocked (>20 images)", "ERROR", "bg-red-400");
+              return;
+            }
+
+            showCard("warn", "Submitting", `Uploading ${state.files.length} files...`);
+            const batch = await uploadBatch(state.files, title || undefined);
+            const summary = batch && batch.summary ? batch.summary : null;
+            if (summary) {
+              showCard("success", "Submitted", `Approved: ${summary.approved} • Review: ${summary.review} • Rejected: ${summary.rejected}`);
+            } else {
+              showCard("success", "Submitted", "Batch upload complete.");
+            }
+            addActivity(`Batch uploaded (${state.files.length} files)`, "SUCCESS", "bg-teal-500");
+          } catch (e) {
+            showCard("error", "Request failed", friendlyNetError(e));
+            addActivity("Request failed", "ERROR", "bg-red-400");
+          } finally {
+            setBusy(false);
+            await refreshSystem();
+          }
+        }
+
+        // Events
+        els.btnSelectPhotos.addEventListener("click", () => els.fileInput.click());
+        els.fileInput.addEventListener("change", (ev) => pickFiles(ev.target.files));
+
+        els.dropzone.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          els.dropzone.classList.add("drop-active");
+        });
+        els.dropzone.addEventListener("dragleave", () => els.dropzone.classList.remove("drop-active"));
+        els.dropzone.addEventListener("drop", (e) => {
+          e.preventDefault();
+          els.dropzone.classList.remove("drop-active");
+          if (e.dataTransfer && e.dataTransfer.files) pickFiles(e.dataTransfer.files);
+        });
+
+        els.btnUseDrive.addEventListener("click", async () => {
+          const driveUrl = (els.driveUrl.value || "").trim();
+          if (!driveUrl) {
+            showCard("error", "Missing URL", "Enter a Drive folder URL.");
+            return;
+          }
+          // Create job immediately for Drive mode.
+          await submit();
+        });
+
+        els.btnSubmit.addEventListener("click", submit);
+        els.btnClear.addEventListener("click", clearAll);
+        els.btnRefresh.addEventListener("click", refreshSystem);
+
+        // Boot
+        showCard("warn", "Ready", "Select photos or use a Drive folder.");
+        resetLiveJobPanels();
+        renderFiles();
+        refreshSystem();
+      })();
+    </script>
+  </body>
+</html>

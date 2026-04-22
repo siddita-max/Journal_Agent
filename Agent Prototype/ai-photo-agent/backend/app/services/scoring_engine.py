@@ -103,12 +103,6 @@ class ScoringEngine:
             if nsfw_detected:
                 policy_reasons.append("NSFW content detected")
 
-            if settings.REJECT_IF_PHONE_DETECTED and inference.yolo.phone_detected:
-                policy_reasons.append("Restricted object detected (Phone)")
-
-            if inference.yolo.people_count > settings.MAX_PEOPLE_IN_PHOTO:
-                policy_reasons.append(f"Capacity exceeded (max {settings.MAX_PEOPLE_IN_PHOTO} people)")
-
         if policy_result and policy_result.hard_rejected:
             policy_reasons.extend(policy_result.reasons)
 
@@ -124,7 +118,7 @@ class ScoringEngine:
         # ── 1.5. User Match Check ──────────────────────────────────
         # If the user provided a search text and it matches poorly (< 30%)
         # We check match_active to ensure we don't reject photos when no search was requested
-        if inference and inference.clip.match_active and inference.clip.semantic_score < 0.30:
+        if inference and inference.clip.match_active and inference.clip.semantic_score < 0.28:
             return ScoreResult(
                 final_score=0.0,
                 decision=Decision.REJECTED,
@@ -143,26 +137,53 @@ class ScoringEngine:
             )
 
         # ── 3. Accept (Default if no violations) ───────────────────
-        return ScoreResult(
-            final_score=1.0,
-            decision=Decision.APPROVED,
-            reasons=[]
+        clip_score = self._clip_score(inference)
+        quality_score = self._quality_score(preprocess)
+        resolution_score = self._resolution_score(preprocess)
+        object_score = policy_result.compliance_score if policy_result else self._object_score(inference)
+        aesthetic_score = self._aesthetic_score(preprocess, inference)
+        composition_score = (resolution_score + aesthetic_score) / 2.0
+
+        final_score = (
+            clip_score * self.w_clip
+            + quality_score * self.w_quality
+            + object_score * self.w_object
+            + composition_score * self.w_aesthetic
         )
+        final_score = max(0.0, min(1.0, round(final_score, 4)))
+
+        hard_rejected = False
+        reasons = self._generate_soft_reasons(
+            clip_score,
+            quality_score,
+            resolution_score,
+            object_score,
+            inference,
+        )
+        if policy_result and policy_result.flagged:
+            reasons.extend(policy_result.reasons)
+            decision = Decision.REVIEW
+        elif final_score >= self.approved_threshold:
+            decision = Decision.APPROVED
+        elif final_score >= self.review_threshold:
+            decision = Decision.REVIEW
+        else:
+            decision = Decision.REJECTED
 
         breakdown = {
             "weights": {
-                "clip": self.w_clip,
-                "quality": self.w_quality,
-                "resolution": self.w_resolution,
-                "object": self.w_object,
-                "aesthetic": self.w_aesthetic,
+                "clip_semantic_match": self.w_clip,
+                "image_quality": self.w_quality,
+                "safety_compliance": self.w_object,
+                "composition_score": self.w_aesthetic,
             },
             "scores": {
                 "clip": round(clip_score, 4),
                 "quality": round(quality_score, 4),
                 "resolution": round(resolution_score, 4),
-                "object": round(object_score, 4),
+                "safety": round(object_score, 4),
                 "aesthetic": round(aesthetic_score, 4),
+                "composition": round(composition_score, 4),
             },
             "thresholds": {
                 "approved": self.approved_threshold,

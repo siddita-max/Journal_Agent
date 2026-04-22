@@ -106,12 +106,13 @@ async def create_job(
     5. Apply weighted scoring and classify each image: `approved`, `review`, or `rejected`
     6. Store images in MinIO buckets and generate a downloadable JSON report
 
-    **Prerequisite:** Share the Drive folder with the service account email found in your `service_account.json`.
+    **Prerequisite:** Share the Drive folder with the service account email configured in your Drive credential JSON.
     """
     drive = GoogleDriveService()
     try:
         folder_id = extract_folder_id(payload.drive_folder_url)
         await _validate_folder_async(drive, folder_id)
+        await _validate_today_only_async(drive, folder_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -255,6 +256,12 @@ async def _validate_folder_async(drive: GoogleDriveService, folder_id: str):
     import asyncio
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, drive.validate_folder_access, folder_id)
+
+
+async def _validate_today_only_async(drive: GoogleDriveService, folder_id: str):
+    import asyncio
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: list(drive.list_images(folder_id)))
 
 
 async def _get_or_404(job_id: str, db: AsyncSession) -> ProcessingJob:

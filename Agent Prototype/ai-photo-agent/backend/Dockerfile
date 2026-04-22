@@ -17,8 +17,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download models
-RUN python -c "import clip; clip.load('ViT-B/32', device='cpu')" || true
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" || true
+RUN python -c "import clip; clip.load('ViT-L/14@336px', device='cpu')" || true
+RUN python -c "from ultralytics import YOLO; YOLO('yolov8s.pt')" || true
 
 COPY . .
 

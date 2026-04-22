@@ -3,7 +3,7 @@
 A scalable, enterprise-grade system for automated photo quality evaluation, safety filtering, and company policy enforcement.
 
 > [!IMPORTANT]  
-> **Testing Priority:** For quick evaluation without setting up Google Cloud, use the **`Direct Upload`** endpoints (`/api/v1/upload/evaluate-batch`) and the **`Policy Engine`** endpoints. The Google Drive functionality is fully implemented but requires `service_account.json` credentials to be placed in the `credentials/` folder.
+> **Testing Priority:** For quick evaluation without setting up Google Cloud, use the **`Direct Upload`** endpoints (`/api/v1/upload/evaluate-batch`) and the **`Policy Engine`** endpoints. The Google Drive functionality is fully implemented but requires the service account JSON to be placed in `backend/credentials/` and mounted into the container at `/app/credentials/`.
 
 ---
 
@@ -32,7 +32,7 @@ Every photo passes through a 4-stage evaluation pipeline:
 
 1.  **Preprocessing (CPU):** Validates raw quality (Blur variance, Brightness, Resolution, Aspect Ratio). Rejects low-quality images early to save cost.
 2.  **Object Detection (YOLOv8s):** Detects people, counts them, and identifies prohibited items (like mobile phones) or required equipment (laptops/office settings).
-3.  **Semantic Evaluation (CLIP):** Understands the "vibe" of the photo. Checks if it matches "Professional corporate portraits" or "Casual selfies."
+3.  **Semantic Evaluation (CLIP ViT-L/14@336px):** Understands the "vibe" of the photo. Checks if it matches "Professional corporate portraits" or "Casual selfies."
 4.  **Safety Check (NudeNet):** Ensures 100% compliance with NSFW/Safety standards.
 
 ---
@@ -69,7 +69,9 @@ I have integrated a **Direct Upload API** specifically for testing:
 Configuration is managed via the `.env` file. Key settings include:
 - `SCORE_APPROVED_THRESHOLD`: (Default: 0.75)
 - `MIN_RESOLUTION_HEIGHT`: (Lowered to 200 for screenshot testing)
-- `YOLO_MODEL_PATH`: Switched to `yolov8s.pt` for higher accuracy.
+- `CLIP_MODEL_NAME`: Set to `ViT-L/14@336px` for better high-resolution semantic matching.
+- `YOLO_MODEL_PATH`: Set to `yolov8s.pt` for consistent accuracy across environments.
+- `YOLO_AUGMENT`: `false` for API requests, `true` only for worker-side warm inference if needed.
 
 ---
 

@@ -20,6 +20,7 @@ from prometheus_client import make_asgi_app
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.core.logging import configure_logging
+from app.services.inference_engine import ModelRegistry
 from app.api.v1 import jobs, images, feedback, health, policies, upload
 
 log = structlog.get_logger()
@@ -50,8 +51,8 @@ a hybrid of rule-based filters and multimodal AI models.
 | Layer | Model | Purpose |
 |---|---|---|
 | Preprocessing | OpenCV | Blur, brightness, resolution, aspect ratio |
-| Semantic | CLIP ViT-B/32 | Professional photo scoring via text-image similarity |
-| Detection | YOLOv8n | People count, phone detection, object policy |
+| Semantic | CLIP ViT-L/14@336px | Professional photo scoring via text-image similarity |
+| Detection | YOLOv8s | People count, phone detection, object policy |
 | Safety | NudeNet | NSFW / inappropriate content detection |
 | **Policy Engine** | **Rule-based + CLIP** | **Company-specific hard/soft constraints** |
 
@@ -136,6 +137,7 @@ async def lifespan(app: FastAPI):
     configure_logging()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    ModelRegistry.preload_all()
     log.info("photo_agent.startup", version=settings.APP_VERSION)
     yield
     await engine.dispose()

@@ -14,7 +14,8 @@ from typing import Optional
 
 import structlog
 from celery import Task
-from sqlalchemy import create_engine
+from celery.exceptions import MaxRetriesExceededError
+from sqlalchemy import create_engine, update, func
 from sqlalchemy.orm import sessionmaker, Session
 
 from app.core.config import settings
@@ -27,7 +28,7 @@ from app.services.preprocessing import PreprocessingPipeline
 from app.services.inference_engine import InferenceEngine
 from app.services.scoring_engine import ScoringEngine, Decision
 from app.services.storage_service import StorageService
-from app.services.policy_engine import PolicyEngine, DEFAULT_POLICY
+from app.services.policy_engine import PolicyEngine, get_school_child_safety_policy
 
 log = structlog.get_logger()
 
@@ -74,21 +75,24 @@ def process_photo_job(self: Task, job_id: str):
         try:
             storage.ensure_buckets()
 
-            # Load and snapshot the active policy at job submission time
-            active_policy = db.query(PolicyConfig).filter(
-                PolicyConfig.is_active == True
+            # Snapshot the DB-stored school journal policy when available.
+            stored_policy = db.query(PolicyConfig).filter(
+                PolicyConfig.name == "school_journal_policy_v1",
+                PolicyConfig.is_active == True,
             ).first()
-            if active_policy:
-                job.policy_id = active_policy.id
-                job.policy_snapshot = active_policy.rules
-                log.info("job.policy_loaded", policy_name=active_policy.name, version=active_policy.version)
-            else:
-                job.policy_snapshot = DEFAULT_POLICY
-                log.info("job.policy_default", msg="No active policy; using built-in defaults")
+            job.policy_snapshot = stored_policy.rules if stored_policy else get_school_child_safety_policy()
+            log.info("job.policy_loaded", policy_name=job.policy_snapshot["name"])
             db.commit()
 
             # Fetch image list
-            files = list(drive_svc.list_images(job.drive_folder_id))
+            try:
+                files = list(drive_svc.list_images(job.drive_folder_id))
+            except ValueError as exc:
+                job.status = JobStatus.FAILED
+                job.error_message = str(exc)
+                db.commit()
+                log.warning("job.invalid_drive_contents", job_id=job_id, error=str(exc))
+                return
             job.total_images = len(files)
             job.status = JobStatus.PROCESSING
             db.commit()
@@ -159,8 +163,11 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
             # ── Step 3: AI Inference (skip if hard-rejected) ──────
             inf_result = None
             if prep_result.ok:
-                inf_result = inference.run(image_bytes, filename)
+                inf_result = inference.run(image_bytes, filename, yolo_augment=True)
                 record.people_count = inf_result.yolo.people_count
+                record.student_count = inf_result.yolo.student_count
+                record.teacher_count = inf_result.yolo.teacher_count
+                record.detected_activity = inf_result.clip.detected_activity
                 record.phone_detected = inf_result.yolo.phone_detected
                 record.detected_objects = inf_result.yolo.detections
                 record.nsfw_detected = inf_result.safety.nsfw_detected
@@ -217,19 +224,12 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
             record.storage_url = storage_path
 
             # ── Step 6: Update job counters ───────────────────────
-            job.processed_images = (job.processed_images or 0) + 1
-            if score_result.decision == Decision.APPROVED:
-                job.approved_count = (job.approved_count or 0) + 1
-            elif score_result.decision == Decision.REJECTED:
-                job.rejected_count = (job.rejected_count or 0) + 1
-            else:
-                job.review_count = (job.review_count or 0) + 1
-
-            # Mark job completed if all images processed
-            if job.processed_images >= job.total_images:
-                job.status = JobStatus.COMPLETED
-                job.completed_at = datetime.now(timezone.utc)
-                _generate_and_store_report(db, job)
+            _increment_job_counters_and_finalize(
+                db=db,
+                job_uuid=uuid.UUID(job_id),
+                decision=score_result.decision,
+                now=datetime.now(timezone.utc),
+            )
 
             # Audit log
             _audit(db, "image", str(record.id), "processed", {
@@ -247,12 +247,38 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
 
         except Exception as exc:
             db.rollback()
-            record.decision = ImageDecision.REJECTED
-            record.rejection_reasons = [f"Processing error: {str(exc)}"]
-            db.add(record)
-            db.commit()
-            log.exception("image.failed", filename=filename, error=str(exc))
-            raise self.retry(exc=exc)
+            log.exception("image.failed", filename=filename, error=str(exc), retries=self.request.retries)
+            try:
+                raise self.retry(exc=exc)
+            except MaxRetriesExceededError:
+                now = datetime.now(timezone.utc)
+                failed_record = ImageRecord(
+                    job_id=uuid.UUID(job_id),
+                    drive_file_id=file_id,
+                    filename=filename,
+                    mime_type=file_meta.get("mime_type"),
+                    file_size_bytes=file_meta.get("size"),
+                    decision=ImageDecision.REJECTED,
+                    rejection_reasons=[f"Processing error after retries: {str(exc)}"],
+                    processed_at=now,
+                )
+                db.add(failed_record)
+
+                _increment_job_counters_and_finalize(
+                    db=db,
+                    job_uuid=uuid.UUID(job_id),
+                    decision=Decision.REJECTED,
+                    now=now,
+                )
+
+                _audit(db, "job", job_id, "image_failed_permanent", {
+                    "filename": filename,
+                    "file_id": file_id,
+                    "error": str(exc),
+                })
+                db.commit()
+                log.error("image.failed_permanent", filename=filename, file_id=file_id)
+                return
 
 
 # ─── Report Generation ────────────────────────────────────────────────────
@@ -297,6 +323,48 @@ def _generate_and_store_report(db: Session, job: ProcessingJob):
 
 
 # ─── Beat Tasks ───────────────────────────────────────────────────────────
+
+def _increment_job_counters_and_finalize(
+    db: Session,
+    job_uuid: uuid.UUID,
+    decision: str,
+    now: datetime,
+):
+    """
+    Increment counters with a single atomic UPDATE and finalize once all images
+    are processed. Avoids FOR UPDATE row-lock deadlocks under concurrent workers.
+    """
+    values = {
+        ProcessingJob.processed_images: func.coalesce(ProcessingJob.processed_images, 0) + 1,
+    }
+
+    if decision == Decision.APPROVED:
+        values[ProcessingJob.approved_count] = func.coalesce(ProcessingJob.approved_count, 0) + 1
+    elif decision == Decision.REJECTED:
+        values[ProcessingJob.rejected_count] = func.coalesce(ProcessingJob.rejected_count, 0) + 1
+    else:
+        values[ProcessingJob.review_count] = func.coalesce(ProcessingJob.review_count, 0) + 1
+
+    db.execute(
+        update(ProcessingJob)
+        .where(ProcessingJob.id == job_uuid)
+        .where(ProcessingJob.status != JobStatus.CANCELLED)
+        .values(values)
+    )
+
+    job = db.query(ProcessingJob).get(job_uuid)
+    if not job:
+        return
+
+    if (
+        job.total_images
+        and (job.processed_images or 0) >= job.total_images
+        and job.status != JobStatus.COMPLETED
+    ):
+        job.status = JobStatus.COMPLETED
+        job.completed_at = now
+        _generate_and_store_report(db, job)
+
 
 @celery_app.task(name="app.worker.tasks.cleanup_stale_jobs")
 def cleanup_stale_jobs():

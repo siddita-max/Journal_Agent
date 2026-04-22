@@ -13,7 +13,7 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-photo_agent}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-photo_agent} -d ${POSTGRES_DB:-photo_agent_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -68,7 +68,7 @@ services:
     volumes:
       - ./backend:/app
       - model_cache:/root/.cache
-      - ./credentials:/app/credentials:ro
+      - ./backend/credentials:/app/credentials:ro
     ports:
       - "8000:8000"   # FastAPI + Swagger UI at /api/docs
     depends_on:
@@ -92,7 +92,7 @@ services:
     volumes:
       - ./backend:/app
       - model_cache:/root/.cache
-      - ./credentials:/app/credentials:ro
+      - ./backend/credentials:/app/credentials:ro
     depends_on:
       postgres:
         condition: service_healthy

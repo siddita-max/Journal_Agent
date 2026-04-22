@@ -1,8 +1,14 @@
 """
 Celery Application — task queue for async photo processing.
 """
+import structlog
 from celery import Celery
+from celery.signals import worker_process_init
+
 from app.core.config import settings
+from app.services.inference_engine import ModelRegistry
+
+log = structlog.get_logger()
 
 celery_app = Celery(
     "photo_agent",
@@ -32,3 +38,18 @@ celery_app.conf.update(
         },
     },
 )
+
+
+@worker_process_init.connect
+def warm_up_models(**kwargs):
+    """
+    Load heavy models once per worker process so the first task does not pay
+    the full cold-start penalty.
+    """
+    try:
+        ModelRegistry.get_clip()
+        ModelRegistry.get_yolo()
+        ModelRegistry.get_safety()
+        log.info("inference.warmup_complete")
+    except Exception as exc:
+        log.warning("inference.warmup_failed", error=str(exc))
