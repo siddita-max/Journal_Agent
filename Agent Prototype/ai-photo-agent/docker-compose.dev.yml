@@ -1,0 +1,139 @@
+services:
+  # ─── Infrastructure ───────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: photo_agent_postgres_dev
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-photo_agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-photo_agent_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-photo_agent_db}
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-photo_agent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: photo_agent_redis_dev
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data_dev:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: photo_agent_minio_dev
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin123}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data_dev:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO Console UI
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  # ─── API Server ───────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+      target: api
+    container_name: photo_agent_api_dev
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-photo_agent}:${POSTGRES_PASSWORD:-photo_agent_secret}@postgres:5432/${POSTGRES_DB:-photo_agent_db}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - DEVICE=cpu
+    volumes:
+      - ./backend:/app
+      - model_cache_dev:/root/.cache
+      - ./credentials:/app/credentials:ro
+    ports:
+      - "8000:8000"   # FastAPI + Swagger UI at /api/docs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── Celery Worker ────────────────────────────────────────────────
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+      target: worker
+    container_name: photo_agent_worker_dev
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-photo_agent}:${POSTGRES_PASSWORD:-photo_agent_secret}@postgres:5432/${POSTGRES_DB:-photo_agent_db}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - DEVICE=cpu
+    volumes:
+      - ./backend:/app
+      - model_cache_dev:/root/.cache
+      - ./credentials:/app/credentials:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+      target: beat
+    container_name: photo_agent_beat_dev
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-photo_agent}:${POSTGRES_PASSWORD:-photo_agent_secret}@postgres:5432/${POSTGRES_DB:-photo_agent_db}
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # ─── Celery Flower (Task Monitoring) ─────────────────────────────
+  flower:
+    image: mher/flower:2.0
+    container_name: photo_agent_flower_dev
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_PORT=5555
+    ports:
+      - "5555:5555"   # Flower task monitor UI
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  postgres_data_dev:
+  redis_data_dev:
+  minio_data_dev:
+  model_cache_dev:

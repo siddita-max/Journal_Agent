@@ -1,0 +1,38 @@
+# ─── Lightweight dev image — Python 3.11 slim (no CUDA) ──────────────────
+# Use this for local testing. GPU support is not needed on a dev machine.
+# Production: use Dockerfile (CUDA-based)
+FROM python:3.11-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 libsm6 libxrender1 libxext6 \
+    curl git && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install CPU-only PyTorch first (much smaller than CUDA build)
+RUN pip install --no-cache-dir \
+    torch==2.2.2+cpu torchvision==0.17.2+cpu \
+    --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements.dev.txt .
+RUN pip install --no-cache-dir -r requirements.dev.txt
+
+COPY . .
+
+# ─── API Server ───────────────────────────────────────────────────
+FROM base AS api
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# ─── Celery Worker ────────────────────────────────────────────────
+FROM base AS worker
+CMD ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "--concurrency=2", "-Q", "photo_processing,default"]
+
+# ─── Celery Beat ──────────────────────────────────────────────────
+FROM base AS beat
+CMD ["celery", "-A", "app.worker.celery_app", "beat", "--loglevel=info"]
