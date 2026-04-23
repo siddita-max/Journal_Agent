@@ -250,6 +250,7 @@ async def evaluate_image(
         ],
         policy_compliance_score=policy_result.compliance_score if policy_result else None,
         storage_url=storage_path,
+        image_data=image_bytes,
         processed_at=datetime.now(timezone.utc),
     )
     db.add(record)

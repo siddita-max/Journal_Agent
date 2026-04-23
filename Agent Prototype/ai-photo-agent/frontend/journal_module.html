@@ -114,85 +114,85 @@
         font-family: "Lexend", sans-serif;
         overflow: hidden;
         height: 100vh;
+        background-image: 
+          radial-gradient(at 0% 0%, rgba(0, 128, 128, 0.05) 0px, transparent 50%),
+          radial-gradient(at 100% 0%, rgba(0, 104, 119, 0.05) 0px, transparent 50%);
       }
       .glass-card {
         background: rgba(255, 255, 255, 0.7);
         backdrop-filter: blur(12px);
         border: 1px solid rgba(0, 128, 128, 0.1);
+        box-shadow: 0 8px 32px 0 rgba(0, 128, 128, 0.05);
       }
       .custom-scrollbar::-webkit-scrollbar {
-        width: 4px;
+        width: 6px;
       }
       .custom-scrollbar::-webkit-scrollbar-track {
         background: transparent;
       }
       .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: #00808033;
+        background: #00808022;
         border-radius: 10px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #00808044;
       }
       .drop-active {
         border-color: rgba(0, 128, 128, 0.85) !important;
-        background: rgba(0, 128, 128, 0.06) !important;
+        background: rgba(0, 128, 128, 0.08) !important;
+        transform: scale(1.01);
+      }
+      .image-card-hover:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 24px -8px rgba(0, 128, 128, 0.2);
+        border-color: rgba(0, 128, 128, 0.3);
+      }
+      .animate-fade-in {
+        animation: fadeIn 0.3s ease-out;
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: scale(0.95); }
+        to { opacity: 1; transform: scale(1); }
       }
     </style>
   </head>
   <body class="bg-background text-on-surface">
-    <!-- Top Navigation Shell -->
-    <header
-      class="bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-b border-teal-100/50 dark:border-teal-900/50 shadow-[0_4px_20px_rgba(0,128,128,0.05)] docked full-width top-0 sticky z-50"
-    >
-      <div class="flex items-center w-full px-8 py-3 max-w-screen-2xl mx-auto">
-        <nav class="hidden md:flex gap-6 font-['Space_Grotesk'] font-medium text-sm tracking-tight">
-          <a class="text-teal-700 dark:text-teal-300 border-b-2 border-teal-600 pb-1" href="#">Journal</a>
-        </nav>
-      </div>
-    </header>
 
-    <!-- Hero Strip -->
-    <section class="w-full h-20 relative overflow-hidden">
-      <img
-        class="absolute inset-0 w-full h-full object-cover blur-[2px] opacity-40"
-        alt="banner"
-        src="https://lh3.googleusercontent.com/aida-public/AB6AXuB6PWlmckLWWHQXYQ7O3BwutB3Y1fjUesX_L_gB0O8sXW9gGjOpA7snRr4kS-w-ViqpRI84nmHyN9M5Ug68EMHzn0ECMJ-BPLUaHhTk0FTXL8rwvxpXne1v9fNhjS9LNAI3B0pztFH0CsfZ7l4SYjXM2iGnLQ5ceBSFxGnY-oUMDmTSZaHRZD-0QkmticE8fzJS6loXgFgQW1BNyrmqwf_yPMyzMGBXAvh8wbdgsOaE7h7m1pRVa7WCIgiesogUd7OZYn4PepztOws"
-      />
-      <div class="absolute inset-0 bg-gradient-to-r from-primary-container/20 to-transparent"></div>
-      <div class="relative h-full flex items-center px-8 max-w-screen-2xl mx-auto">
-        <h1 class="font-headline-md text-headline-md text-primary tracking-tight">Journal Operations Module</h1>
-      </div>
-    </section>
-
-    <main class="max-w-screen-2xl mx-auto px-8 py-6 h-[calc(100vh-180px)] flex flex-col gap-6">
+    <main class="max-w-screen-2xl mx-auto px-8 py-10 h-screen flex flex-col gap-8">
       <div class="grid grid-cols-12 gap-6 flex-1 overflow-hidden">
         <!-- Left Column: Upload & Inputs -->
         <div class="col-span-12 lg:col-span-8 flex flex-col gap-6 overflow-hidden">
           <div
-            class="bg-surface-container-lowest p-6 rounded-xl border border-teal-100/50 shadow-[0_20px_40px_rgba(0,128,128,0.08)] flex-1 flex flex-col"
+            class="bg-white/70 backdrop-blur-md p-8 rounded-2xl border border-teal-100/50 shadow-[0_20px_50px_rgba(0,128,128,0.05)] flex-1 flex flex-col"
           >
-            <div class="flex items-center justify-between mb-4">
-              <h2 class="font-headline-md text-lg text-primary">Media Upload</h2>
-              <span class="text-xs font-label-caps uppercase text-teal-600 bg-teal-50 px-2 py-1 rounded"
-                >Daily Batch</span
+            <div class="flex items-center justify-between mb-8">
+              <div>
+                <h2 class="font-headline-md text-xl text-slate-800">Media Upload</h2>
+                <p class="text-slate-400 text-xs mt-1">Upload today's event photos for AI evaluation</p>
+              </div>
+              <span class="text-[10px] font-bold uppercase tracking-widest text-teal-600 bg-teal-50 px-3 py-1.5 rounded-full border border-teal-100"
+                >Batch v1.2</span
               >
             </div>
-            <div class="grid grid-cols-2 gap-4 mb-6">
+            <div class="grid grid-cols-2 gap-6 mb-8">
               <div class="flex flex-col gap-2">
-                <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider" for="journalTitle"
+                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest" for="journalTitle"
                   >Journal Title</label
                 >
                 <input
                   id="journalTitle"
-                  class="w-full bg-slate-50 border-0 border-b border-teal-100 focus:ring-0 focus:border-primary transition-all rounded-t-lg font-body-md text-sm py-2 px-3"
-                  placeholder="e.g., Robotics Workshop - Phase 2"
+                  class="w-full bg-slate-50/50 border border-slate-100 focus:bg-white focus:ring-4 focus:ring-teal-500/5 focus:border-teal-500 transition-all rounded-xl font-body-md text-sm py-3 px-4 outline-none"
+                  placeholder="e.g., Robotics Workshop"
                   type="text"
                 />
               </div>
               <div class="flex flex-col gap-2">
-                <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider" for="driveUrl"
+                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest" for="driveUrl"
                   >Drive Folder URL</label
                 >
                 <input
                   id="driveUrl"
-                  class="w-full bg-slate-50 border-0 border-b border-teal-100 focus:ring-0 focus:border-primary transition-all rounded-t-lg font-body-md text-sm py-2 px-3"
+                  class="w-full bg-slate-50/50 border border-slate-100 focus:bg-white focus:ring-4 focus:ring-teal-500/5 focus:border-teal-500 transition-all rounded-xl font-body-md text-sm py-3 px-4 outline-none"
                   placeholder="https://drive.google.com/..."
                   type="text"
                 />
@@ -204,30 +204,31 @@
             <!-- Drag & Drop -->
             <div
               id="dropzone"
-              class="flex-1 border-2 border-dashed border-teal-200 rounded-xl bg-teal-50/20 flex flex-col items-center justify-center gap-4 transition-all hover:bg-teal-50/40 hover:border-teal-400 group relative"
+              class="flex-1 border-2 border-dashed border-teal-200/50 rounded-2xl bg-teal-50/30 flex flex-col items-center justify-center gap-6 transition-all hover:bg-teal-50/50 hover:border-teal-400 group relative overflow-hidden"
             >
-              <div class="bg-white p-4 rounded-full shadow-sm text-primary-container">
-                <span class="material-symbols-outlined text-4xl">cloud_upload</span>
+              <div class="absolute inset-0 bg-gradient-to-b from-transparent to-teal-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+              <div class="bg-white p-5 rounded-2xl shadow-sm text-teal-600 group-hover:scale-110 transition-transform duration-500">
+                <span class="material-symbols-outlined text-5xl">cloud_upload</span>
               </div>
-              <div class="text-center">
-                <p class="font-body-lg text-slate-600">Drag and drop photos here</p>
-                <p class="text-xs text-slate-400 mt-1">PNG, JPG, WEBP up to 20MB</p>
+              <div class="text-center relative z-10">
+                <p class="font-body-lg text-slate-700 font-semibold text-lg">Drop your photos here</p>
+                <p class="text-sm text-slate-400 mt-1">or click the button below to browse</p>
               </div>
-              <div class="flex gap-3">
+              <div class="flex gap-4 relative z-10">
                 <button
                   id="btnSelectPhotos"
-                  class="px-6 py-2 bg-primary-container text-on-primary rounded-lg font-['Space_Grotesk'] text-sm font-semibold hover:bg-primary transition-all shadow-md active:scale-95"
+                  class="px-8 py-3 bg-teal-600 text-white rounded-xl font-['Space_Grotesk'] text-sm font-bold hover:bg-teal-700 transition-all shadow-lg shadow-teal-600/20 active:scale-95"
                   type="button"
                 >
                   Select Photos
                 </button>
                 <button
                   id="btnUseDrive"
-                  class="px-6 py-2 border border-teal-600 text-teal-700 rounded-lg font-['Space_Grotesk'] text-sm font-semibold hover:bg-teal-50 transition-all active:scale-95 flex items-center gap-2"
+                  class="px-8 py-3 bg-white border border-teal-200 text-teal-700 rounded-xl font-['Space_Grotesk'] text-sm font-bold hover:bg-teal-50 transition-all active:scale-95 flex items-center gap-2"
                   type="button"
                 >
-                  <span class="material-symbols-outlined text-sm">folder_open</span>
-                  Use Drive Folder
+                  <span class="material-symbols-outlined text-sm">folder_shared</span>
+                  Import from Drive
                 </button>
               </div>
             </div>
@@ -321,27 +322,30 @@
             </div>
           </div>
 
-          <div class="bg-surface-container-lowest p-4 rounded-xl border border-teal-100/50 shadow-[0_10px_20px_rgba(0,128,128,0.06)] flex flex-col gap-3 max-h-[38%]">
-            <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-widest">Live Decisions</h3>
-            <div class="grid grid-cols-3 gap-3 overflow-hidden">
-              <div class="min-w-0">
-                <p class="text-[10px] font-bold text-teal-700 uppercase mb-1">Selected</p>
-                <div id="approvedList" class="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pr-1"></div>
+          <div class="bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-teal-100/50 shadow-[0_10px_30px_rgba(0,128,128,0.04)] flex flex-col gap-4 max-h-[45%]">
+            <div class="flex items-center justify-between">
+              <h3 class="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Live AI Decisions</h3>
+              <span class="flex h-2 w-2 rounded-full bg-teal-500 animate-pulse"></span>
+            </div>
+            <div class="grid grid-cols-3 gap-4 overflow-hidden h-full">
+              <div class="flex flex-col min-w-0 bg-teal-50/30 rounded-xl p-2 border border-teal-100/30">
+                <p class="text-[9px] font-black text-teal-700 uppercase mb-2 px-1">Selected</p>
+                <div id="approvedList" class="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1"></div>
               </div>
-              <div class="min-w-0">
-                <p class="text-[10px] font-bold text-amber-700 uppercase mb-1">Review</p>
-                <div id="reviewList" class="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pr-1"></div>
+              <div class="flex flex-col min-w-0 bg-amber-50/30 rounded-xl p-2 border border-amber-100/30">
+                <p class="text-[9px] font-black text-amber-700 uppercase mb-2 px-1">Review</p>
+                <div id="reviewList" class="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1"></div>
               </div>
-              <div class="min-w-0">
-                <p class="text-[10px] font-bold text-red-700 uppercase mb-1">Rejected</p>
-                <div id="rejectedList" class="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pr-1"></div>
+              <div class="flex flex-col min-w-0 bg-red-50/30 rounded-xl p-2 border border-red-100/30">
+                <p class="text-[9px] font-black text-red-700 uppercase mb-2 px-1">Rejected</p>
+                <div id="rejectedList" class="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1"></div>
               </div>
             </div>
           </div>
 
           <!-- Activity List -->
-          <div class="bg-white/40 p-5 rounded-xl border border-teal-100/30 flex-1 flex flex-col overflow-hidden">
-            <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">Recent Activity</h3>
+          <div class="bg-white/40 p-6 rounded-2xl border border-teal-100/20 flex-1 flex flex-col overflow-hidden">
+            <h3 class="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">Activity Stream</h3>
             <div class="flex-1 overflow-y-auto custom-scrollbar pr-2">
               <ul id="activityList" class="space-y-4"></ul>
             </div>
@@ -366,6 +370,76 @@
         </div>
       </div>
     </footer>
+
+    <!-- Image Preview Modal -->
+    <div id="imageModal" class="fixed inset-0 z-[100] hidden">
+      <div class="absolute inset-0 bg-slate-900/90 backdrop-blur-sm"></div>
+      <div class="absolute inset-0 flex items-center justify-center p-4 md:p-8">
+        <div class="bg-white dark:bg-slate-900 w-full max-w-5xl max-h-full rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row relative animate-fade-in">
+          <button id="btnCloseModal" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 z-10 p-2 bg-white/10 rounded-full backdrop-blur-md transition-colors">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+          
+          <!-- Image Side -->
+          <div class="flex-1 bg-slate-100 dark:bg-slate-950 flex items-center justify-center overflow-hidden min-h-[300px]">
+            <img id="modalImg" src="" alt="Full preview" class="max-w-full max-h-full object-contain shadow-inner" />
+          </div>
+          
+          <!-- Content Side -->
+          <div class="w-full md:w-96 p-8 flex flex-col gap-6 bg-white dark:bg-slate-900 border-l border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 id="modalFilename" class="font-headline-md text-xl text-slate-800 dark:text-white truncate">Filename.jpg</h3>
+              <div class="flex items-center gap-3 mt-2">
+                <p id="modalScore" class="text-sm text-teal-600 font-bold">Score: 0.985</p>
+                <div id="modalDecisionChip" class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">Approved</div>
+              </div>
+            </div>
+            
+            <div class="flex-1 space-y-6 overflow-y-auto custom-scrollbar pr-2">
+              <div>
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">AI Analysis Reason</p>
+                <p id="modalReason" class="text-sm text-slate-600 dark:text-slate-300 mt-2 leading-relaxed italic border-l-2 border-teal-500 pl-4 py-1">
+                  "This image features a clear subject with good lighting and composition."
+                </p>
+              </div>
+              
+              <div class="grid grid-cols-2 gap-4">
+                <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                  <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Detected Role</p>
+                  <p id="modalRole" class="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-1">Student</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                  <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Face Count</p>
+                  <p id="modalFaceCount" class="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-1">1</p>
+                </div>
+                <div class="col-span-2 p-3 rounded-xl bg-teal-50/50 dark:bg-teal-900/20 border border-teal-100/50 dark:border-teal-800/50">
+                  <p class="text-[9px] font-bold text-teal-600 dark:text-teal-400 uppercase tracking-widest">AI Detected Activity</p>
+                  <p id="modalActivity" class="text-sm font-bold text-slate-700 dark:text-slate-200 mt-1 capitalize">Classroom Learning</p>
+                </div>
+              </div>
+            </div>
+            
+            <div class="flex flex-col gap-3 pt-6 border-t border-slate-100 dark:border-slate-800">
+              <div class="flex gap-3">
+                <button id="modalBtnApprove" class="flex-1 py-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-teal-600/20">
+                  <span class="material-symbols-outlined">check_circle</span>
+                  Approve
+                </button>
+                <button id="modalBtnReject" class="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-red-500/20">
+                  <span class="material-symbols-outlined">cancel</span>
+                  Reject
+                </button>
+              </div>
+              <button id="modalBtnNext" class="w-full py-3 bg-slate-600 hover:bg-slate-700 text-white rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg">
+                <span class="material-symbols-outlined">arrow_forward</span>
+                Next Image
+              </button>
+              <p class="text-[10px] text-center text-slate-400">Decision will be saved immediately to the database.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script>
       (function () {
@@ -405,6 +479,19 @@
           warnMsg: document.getElementById("warnMsg"),
           errorTitle: document.getElementById("errorTitle"),
           errorMsg: document.getElementById("errorMsg"),
+          imageModal: document.getElementById("imageModal"),
+          modalImg: document.getElementById("modalImg"),
+          modalFilename: document.getElementById("modalFilename"),
+          modalScore: document.getElementById("modalScore"),
+          modalDecisionChip: document.getElementById("modalDecisionChip"),
+          modalReason: document.getElementById("modalReason"),
+          modalRole: document.getElementById("modalRole"),
+          modalFaceCount: document.getElementById("modalFaceCount"),
+          modalActivity: document.getElementById("modalActivity"),
+          modalBtnApprove: document.getElementById("modalBtnApprove"),
+          modalBtnReject: document.getElementById("modalBtnReject"),
+          modalBtnNext: document.getElementById("modalBtnNext"),
+          btnCloseModal: document.getElementById("btnCloseModal"),
         };
 
         const state = {
@@ -412,6 +499,11 @@
           driveJob: null,
           busy: false,
           lastLiveRefreshMs: 0,
+          currentModalImage: null,
+          currentModalJobId: null,
+          currentModalLane: null,        // Track which lane (approved/review/rejected) we're viewing
+          currentModalLaneImages: [],    // All images in the current lane
+          currentModalImageIndex: 0,     // Current position in lane
         };
 
         function nowLabel() {
@@ -491,79 +583,243 @@
           els.fileList.innerHTML = "";
           if (!state.files.length) {
             const empty = document.createElement("div");
-            empty.className = "text-xs text-slate-400";
-            empty.textContent = "No files selected";
+            empty.className = "text-[10px] text-slate-400 text-center py-8 italic";
+            empty.textContent = "No files selected for upload";
             els.fileList.appendChild(empty);
             return;
           }
 
-          let wrongDateCount = 0;
           for (const f of state.files) {
-            const okDate = isToday(f.lastModified);
-            if (!okDate) wrongDateCount++;
-
             const row = document.createElement("div");
-            row.className =
-              "flex items-center justify-between p-2 rounded-lg " +
-              (okDate ? "bg-slate-50 border border-slate-100" : "bg-red-50/50 border border-red-100");
+            row.className = "flex items-center justify-between p-3 rounded-xl transition-all bg-white border border-slate-100 hover:border-teal-200 shadow-sm";
 
             const left = document.createElement("div");
-            left.className = "flex items-center gap-3 overflow-hidden";
+            left.className = "flex items-center gap-4 overflow-hidden";
+            const iconWrap = document.createElement("div");
+            iconWrap.className = "w-10 h-10 rounded-lg flex items-center justify-center bg-teal-50 text-teal-600";
             const icon = document.createElement("span");
-            icon.className = "material-symbols-outlined text-lg " + (okDate ? "text-teal-500" : "text-red-500");
-            icon.textContent = okDate ? "image" : "history";
+            icon.className = "material-symbols-outlined text-xl";
+            icon.textContent = "image";
+            iconWrap.appendChild(icon);
+
             const meta = document.createElement("div");
             meta.className = "truncate";
             const name = document.createElement("p");
-            name.className = "text-xs font-medium truncate " + (okDate ? "text-slate-700" : "text-red-700");
+            name.className = "text-xs font-bold truncate text-slate-700";
             name.textContent = f.name;
             const sub = document.createElement("p");
-            sub.className = "text-[10px] " + (okDate ? "text-slate-400" : "text-red-400");
+            sub.className = "text-[10px] text-slate-400";
             const dt = new Date(f.lastModified);
             sub.textContent = `${dt.toLocaleDateString()} • ${bytesToMb(f.size)}`;
             meta.appendChild(name);
             meta.appendChild(sub);
-            left.appendChild(icon);
+            left.appendChild(iconWrap);
             left.appendChild(meta);
 
             const chip = document.createElement("span");
-            chip.className =
-              "text-[10px] px-2 py-0.5 rounded-full font-bold " +
-              (okDate ? "bg-teal-100 text-teal-700" : "bg-red-100 text-red-700");
-            chip.textContent = okDate ? "READY" : "WRONG DATE";
+            chip.className = "text-[9px] px-2 py-1 rounded-full font-black tracking-wider bg-teal-500/10 text-teal-700";
+            chip.textContent = "READY";
 
             row.appendChild(left);
             row.appendChild(chip);
             els.fileList.appendChild(row);
           }
 
-          if (wrongDateCount > 0) {
-            showCard("error", "Upload blocked", "Only today's photos can be submitted.");
-          } else {
-            showCard("success", "Photos ready", `${state.files.length} file(s) ready.`);
-          }
+          showCard("success", "Files Ready", `Successfully validated ${state.files.length} images.`);
         }
 
-        function renderDecisionMiniList(container, images, tone) {
+        function renderDecisionCards(container, images, tone, jobId) {
           container.innerHTML = "";
           if (!images || !images.length) {
             const empty = document.createElement("div");
-            empty.className = "text-[10px] text-slate-400";
-            empty.textContent = "-";
+            empty.className = "text-[10px] text-slate-400 py-4 text-center";
+            empty.textContent = "No images yet";
             container.appendChild(empty);
             return;
           }
-          for (const img of images) {
+          for (let imgIndex = 0; imgIndex < images.length; imgIndex++) {
+            const img = images[imgIndex];
             const row = document.createElement("div");
-            row.className =
-              "text-[10px] px-2 py-1 rounded border truncate " +
+            row.className = "rounded-xl border border-slate-100 overflow-hidden bg-white shadow-sm transition-all cursor-pointer image-card-hover";
+            
+            // Open modal on click with lane information
+            row.addEventListener("click", () => openImageModal(img, tone, jobId, images, imgIndex, tone));
+
+            const thumbContainer = document.createElement("div");
+            thumbContainer.className = "relative h-24 overflow-hidden group";
+
+            const thumb = document.createElement("img");
+            thumb.className = "w-full h-full object-cover bg-slate-100 transition-transform duration-500 group-hover:scale-110";
+            thumb.alt = img.filename || "image";
+
+            const primaryUrl = img.preview_url || null;
+            const fallbackUrl = img.db_image_url ? `${API_BASE}${img.db_image_url}` : null;
+
+            if (primaryUrl) {
+              thumb.src = primaryUrl;
+              if (fallbackUrl) {
+                thumb.onerror = () => {
+                  thumb.onerror = null;
+                  thumb.src = fallbackUrl;
+                };
+              }
+            } else if (fallbackUrl) {
+              thumb.src = fallbackUrl;
+            } else {
+              thumb.style.display = "none";
+            }
+            
+            const overlay = document.createElement("div");
+            overlay.className = "absolute inset-0 bg-teal-900/0 group-hover:bg-teal-900/20 flex items-center justify-center transition-all";
+            const viewIcon = document.createElement("span");
+            viewIcon.className = "material-symbols-outlined text-white opacity-0 group-hover:opacity-100 transition-opacity";
+            viewIcon.textContent = "visibility";
+            overlay.appendChild(viewIcon);
+            
+            thumbContainer.appendChild(thumb);
+            thumbContainer.appendChild(overlay);
+
+            const body = document.createElement("div");
+            body.className = "p-2";
+
+            const top = document.createElement("div");
+            top.className = "flex items-start justify-between gap-1";
+
+            const left = document.createElement("div");
+            left.className = "min-w-0";
+            const name = document.createElement("p");
+            name.className = "text-[10px] font-semibold text-slate-700 truncate";
+            name.textContent = img.filename || "unknown";
+            const meta = document.createElement("p");
+            meta.className = "text-[10px] text-slate-400";
+            const score = Number.isFinite(Number(img.final_score)) ? Number(img.final_score).toFixed(3) : "-";
+            meta.textContent = `Score ${score}`;
+            const activity = document.createElement("p");
+            activity.className = "text-[9px] font-bold text-teal-600/80 mt-0.5 truncate capitalize";
+            activity.textContent = img.detected_activity || "No activity detected";
+            
+            left.appendChild(name);
+            left.appendChild(meta);
+            left.appendChild(activity);
+
+            const chip = document.createElement("span");
+            chip.className =
+              "text-[8px] px-1.5 py-0.5 rounded-full font-bold whitespace-nowrap " +
               (tone === "approved"
-                ? "bg-teal-50 border-teal-100 text-teal-800"
+                ? "bg-teal-50 text-teal-700"
                 : tone === "review"
-                  ? "bg-amber-50 border-amber-100 text-amber-800"
-                  : "bg-red-50 border-red-100 text-red-800");
-            row.textContent = img.filename || "unknown";
+                  ? "bg-amber-50 text-amber-700"
+                  : "bg-red-50 text-red-700");
+            chip.textContent = (img.effective_decision || tone || "pending").toUpperCase();
+
+            top.appendChild(left);
+            top.appendChild(chip);
+            body.appendChild(top);
+
+            row.appendChild(thumbContainer);
+            row.appendChild(body);
             container.appendChild(row);
+          }
+        }
+
+        function openImageModal(img, tone, jobId, laneImages = [], laneIndex = 0, laneName = null) {
+          state.currentModalImage = img;
+          state.currentModalJobId = jobId;
+          state.currentModalLaneImages = laneImages;
+          state.currentModalImageIndex = laneIndex;
+          state.currentModalLane = laneName;
+          
+          const primaryUrl = img.preview_url || null;
+          const fallbackUrl = img.db_image_url ? `${API_BASE}${img.db_image_url}` : null;
+          
+          els.modalImg.src = primaryUrl || fallbackUrl || "";
+          if (primaryUrl && fallbackUrl) {
+            els.modalImg.onerror = () => {
+              els.modalImg.onerror = null;
+              els.modalImg.src = fallbackUrl;
+            };
+          }
+          
+          els.modalFilename.textContent = img.filename || "Unknown Image";
+          const score = Number.isFinite(Number(img.final_score)) ? Number(img.final_score).toFixed(4) : "-";
+          els.modalScore.textContent = `Score: ${score}`;
+          
+          const decision = (img.effective_decision || tone || "pending").toLowerCase();
+          els.modalDecisionChip.textContent = decision.toUpperCase();
+          els.modalDecisionChip.className = "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider " +
+            (decision === "approved" ? "bg-teal-100 text-teal-700" : 
+             decision === "review" ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-700");
+          
+          els.modalReason.textContent = img.ai_reason || "No analysis details provided by the AI.";
+          els.modalRole.textContent = img.role_classification || "Unknown";
+          els.modalFaceCount.textContent = img.face_count !== undefined ? img.face_count : "-";
+          els.modalActivity.textContent = img.detected_activity || "General School Scene";
+          
+          // Update Next button visibility and label
+          const hasNext = laneImages.length > 0 && laneIndex < laneImages.length - 1;
+          els.modalBtnNext.style.display = hasNext ? "flex" : "none";
+          
+          els.imageModal.classList.remove("hidden");
+          document.body.style.overflow = "hidden";
+        }
+
+        function closeImageModal() {
+          els.imageModal.classList.add("hidden");
+          document.body.style.overflow = "";
+          state.currentModalImage = null;
+          state.currentModalJobId = null;
+          state.currentModalLaneImages = [];
+          state.currentModalImageIndex = 0;
+          state.currentModalLane = null;
+        }
+
+        function showNextImage() {
+          if (!state.currentModalLaneImages || state.currentModalLaneImages.length === 0) {
+            return;
+          }
+          
+          const nextIndex = state.currentModalImageIndex + 1;
+          if (nextIndex < state.currentModalLaneImages.length) {
+            const nextImg = state.currentModalLaneImages[nextIndex];
+            openImageModal(
+              nextImg,
+              state.currentModalLane,
+              state.currentModalJobId,
+              state.currentModalLaneImages,
+              nextIndex,
+              state.currentModalLane
+            );
+          }
+        }
+
+        async function modalAction(decision) {
+          if (!state.currentModalImage) return;
+          const img = state.currentModalImage;
+          const jobId = state.currentModalJobId;
+          const btn = decision === "approved" ? els.modalBtnApprove : els.modalBtnReject;
+          
+          // ✨ OPTIMISTIC: Close modal immediately for zero-latency feel
+          addActivity(`Human ${decision} ${img.filename || img.id}`, "SUCCESS", decision === "approved" ? "bg-teal-500" : "bg-red-500");
+          closeImageModal();
+          
+          // ✨ OPTIMISTIC: Refresh lanes in background immediately to show movement
+          if (jobId) {
+            refreshReviewLanes(jobId).catch(_ => {});
+          }
+
+          try {
+            // Save override to backend in background
+            await overrideImageDecision(img.id, decision);
+            
+            // Final refresh to ensure sync (in case of background hiccups)
+            if (jobId) {
+              setTimeout(() => refreshReviewLanes(jobId), 300);
+            }
+          } catch (e) {
+            console.error("override_failed", e);
+            addActivity(`Override failed for ${img.filename}`, "ERROR", "bg-red-400");
+            // If it fails, a simple refresh will revert the local optimistic state
+            if (jobId) refreshReviewLanes(jobId);
           }
         }
 
@@ -575,26 +831,20 @@
           els.approvedCountLive.textContent = "0";
           els.reviewCountLive.textContent = "0";
           els.rejectedCountLive.textContent = "0";
-          renderDecisionMiniList(els.approvedList, [], "approved");
-          renderDecisionMiniList(els.reviewList, [], "review");
-          renderDecisionMiniList(els.rejectedList, [], "rejected");
+          renderDecisionCards(els.approvedList, [], "approved");
+          renderDecisionCards(els.reviewList, [], "review");
+          renderDecisionCards(els.rejectedList, [], "rejected");
         }
 
         function updateProgressUI(job) {
           els.jobProgressSection.classList.remove("hidden");
           const total = Number(job && job.total_images ? job.total_images : 0);
           const processed = Number(job && job.processed_images ? job.processed_images : 0);
-          const approved = Number(job && job.approved_count ? job.approved_count : 0);
-          const review = Number(job && job.review_count ? job.review_count : 0);
-          const rejected = Number(job && job.rejected_count ? job.rejected_count : 0);
           const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
 
           els.jobProgressLabel.textContent = `${processed} / ${total}`;
           els.jobProgressBar.style.width = `${pct}%`;
           els.jobStatusText.textContent = `Status: ${(job && job.status ? job.status : "pending").toUpperCase()} • ${pct}%`;
-          els.approvedCountLive.textContent = String(approved);
-          els.reviewCountLive.textContent = String(review);
-          els.rejectedCountLive.textContent = String(rejected);
         }
 
         async function parseApiError(resp) {
@@ -657,6 +907,29 @@
           return await fetchJson("/api/v1/upload/evaluate-batch", { method: "POST", body: form });
         }
 
+        async function overrideImageDecision(imageId, decision, reason) {
+          return await apiPostJson(`/api/v1/images/${encodeURIComponent(imageId)}/override`, {
+            decision,
+            reason: reason || "Human in loop approval",
+            annotator: "journal-ui",
+          });
+        }
+
+        async function refreshReviewLanes(jobId) {
+          if (!jobId) return;
+          const [approved, review, rejected] = await Promise.all([
+            loadJobImages(jobId, "approved"),
+            loadJobImages(jobId, "review"),
+            loadJobImages(jobId, "rejected"),
+          ]);
+          renderDecisionCards(els.approvedList, approved, "approved", jobId);
+          renderDecisionCards(els.reviewList, review, "review", jobId);
+          renderDecisionCards(els.rejectedList, rejected, "rejected", jobId);
+          els.approvedCountLive.textContent = String(approved.length);
+          els.reviewCountLive.textContent = String(review.length);
+          els.rejectedCountLive.textContent = String(rejected.length);
+        }
+
         async function pollJob(jobId) {
           const start = Date.now();
           state.lastLiveRefreshMs = 0;
@@ -669,14 +942,7 @@
             if (now - state.lastLiveRefreshMs > 2500) {
               state.lastLiveRefreshMs = now;
               try {
-                const [approved, review, rejected] = await Promise.all([
-                  loadJobImages(jobId, "approved"),
-                  loadJobImages(jobId, "review"),
-                  loadJobImages(jobId, "rejected"),
-                ]);
-                renderDecisionMiniList(els.approvedList, approved, "approved");
-                renderDecisionMiniList(els.reviewList, review, "review");
-                renderDecisionMiniList(els.rejectedList, rejected, "rejected");
+                await refreshReviewLanes(jobId);
               } catch (_) {
                 // ignore live preview hiccups while polling
               }
@@ -694,7 +960,7 @@
 
         async function loadJobImages(jobId, decision) {
           // Keep it light: first page only.
-          let path = `/api/v1/images/?job_id=${encodeURIComponent(jobId)}&limit=8&offset=0`;
+          let path = `/api/v1/images/?job_id=${encodeURIComponent(jobId)}&limit=12&offset=0`;
           if (decision) path += `&decision=${encodeURIComponent(decision)}`;
           return await apiGet(path);
         }
@@ -799,11 +1065,8 @@
           const title = (els.journalTitle.value || "").trim();
           const driveUrl = (els.driveUrl.value || "").trim();
 
-          // Client-side today check for local files (Drive has server-side strict rule).
-          const wrong = state.files.some((f) => !isToday(f.lastModified));
-          if (wrong) {
-            showCard("error", "Upload blocked", "Only today's photos can be submitted.");
-            addActivity("Submission blocked (wrong date)", "ERROR", "bg-red-400");
+          if (!driveUrl && !state.files.length) {
+            showCard("error", "Selection required", "Select local photos or provide a Drive URL.");
             return;
           }
 
@@ -830,14 +1093,7 @@
                 }
                 addActivity(`Drive job completed (${finalJob.id})`, "SUCCESS", "bg-teal-500");
                 try {
-                  const [approved, review, rejected] = await Promise.all([
-                    loadJobImages(finalJob.id, "approved"),
-                    loadJobImages(finalJob.id, "review"),
-                    loadJobImages(finalJob.id, "rejected"),
-                  ]);
-                  renderDecisionMiniList(els.approvedList, approved, "approved");
-                  renderDecisionMiniList(els.reviewList, review, "review");
-                  renderDecisionMiniList(els.rejectedList, rejected, "rejected");
+                  await refreshReviewLanes(finalJob.id);
                 } catch (_) {
                   // ignore UI enrichment failures
                 }
@@ -925,6 +1181,14 @@
         els.btnSubmit.addEventListener("click", submit);
         els.btnClear.addEventListener("click", clearAll);
         els.btnRefresh.addEventListener("click", refreshSystem);
+
+        els.btnCloseModal.addEventListener("click", closeImageModal);
+        els.imageModal.addEventListener("click", (e) => {
+          if (e.target === els.imageModal) closeImageModal();
+        });
+        els.modalBtnApprove.addEventListener("click", () => modalAction("approved"));
+        els.modalBtnReject.addEventListener("click", () => modalAction("rejected"));
+        els.modalBtnNext.addEventListener("click", showNextImage);
 
         // Boot
         showCard("warn", "Ready", "Select photos or use a Drive folder.");

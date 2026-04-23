@@ -51,17 +51,26 @@ class Settings(BaseSettings):
     CELERY_CONCURRENCY: int = 4
 
     # ── MinIO ────────────────────────────────────────────────────────
-    MINIO_ENDPOINT: str = "localhost:9000"
+    MINIO_ENDPOINT: str = "minio:9000"
+    MINIO_PUBLIC_ENDPOINT: str = "localhost:9000"
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin123"
     MINIO_BUCKET_APPROVED: str = "approved-images"
     MINIO_BUCKET_REJECTED: str = "rejected-images"
     MINIO_SECURE: bool = False
 
+    def get_minio_public_endpoint(self) -> str:
+        """Return the public MinIO endpoint (for presigned URLs the browser opens)."""
+        return self.MINIO_PUBLIC_ENDPOINT.strip() or self.MINIO_ENDPOINT
+
     # ── AI Models ────────────────────────────────────────────────────
     CLIP_MODEL_NAME: str = "ViT-L/14@336px"
     YOLO_MODEL_PATH: str = "yolov8s.pt"
     YOLO_AUGMENT: bool = False
+    QWEN_ENABLED: bool = True
+    QWEN_MODEL_NAME: str = "Qwen/Qwen2-VL-2B-Instruct"  # 2B model fits in 4GB VRAM (RTX 3050)
+    QWEN_DEVICE: str = "auto"  # auto | cpu | cuda
+    QWEN_CACHE_ENABLED: bool = True
     DEVICE: str = "auto"  # auto | cpu | cuda
 
     # ── Scoring Thresholds ───────────────────────────────────────────
@@ -69,9 +78,9 @@ class Settings(BaseSettings):
     SCORE_REVIEW_THRESHOLD: float = 0.60
 
     # ── Preprocessing Limits ─────────────────────────────────────────
-    MIN_RESOLUTION_WIDTH: int = 1280
-    MIN_RESOLUTION_HEIGHT: int = 720
-    MIN_BLUR_VARIANCE: float = 120.0
+    MIN_RESOLUTION_WIDTH: int = 100
+    MIN_RESOLUTION_HEIGHT: int = 100
+    MIN_BLUR_VARIANCE: float = 30.0
     MIN_BRIGHTNESS: int = 40
     MAX_BRIGHTNESS: int = 220
     MIN_ASPECT_RATIO: float = 0.5
@@ -104,7 +113,22 @@ class Settings(BaseSettings):
         value = (self.YOLO_MODEL_PATH or "").strip()
         if value.lower() != "auto":
             return value
-        return "/app/models/yolov8s.pt" if self.get_device() == "cuda" else "/app/models/yolov8n.pt"
+        return "/app/models/yolov8s.pt" if self.get_device() == "cuda" else "/app/models/yolov8n.pt"  # nano on CPU, small on GPU
+
+    def get_qwen_device(self) -> str:
+        if self.QWEN_DEVICE == "auto":
+            try:
+                import torch
+                return "cuda" if torch.cuda.is_available() else "cpu"
+            except ImportError:
+                return "cpu"
+        return self.QWEN_DEVICE
+
+    def get_qwen_model_name(self) -> str:
+        value = (self.QWEN_MODEL_NAME or "").strip()
+        if value.lower() != "auto":
+            return value
+        return "Qwen/Qwen2-VL-2B-Instruct"
 
 
 @lru_cache()

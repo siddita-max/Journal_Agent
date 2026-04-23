@@ -222,8 +222,20 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
                 content_type=file_meta.get("mime_type", "image/jpeg"),
             )
             record.storage_url = storage_path
+            record.image_data = image_bytes
 
             # ── Step 6: Update job counters ───────────────────────
+            # Re-check CANCELLED before committing — job may have been cancelled
+            # while this image was being processed (download/inference can take seconds).
+            db.refresh(job)
+            if job.status == JobStatus.CANCELLED:
+                log.info(
+                    "image.skipped_cancelled",
+                    filename=filename,
+                    job_id=job_id,
+                )
+                return
+
             _increment_job_counters_and_finalize(
                 db=db,
                 job_uuid=uuid.UUID(job_id),
@@ -333,6 +345,7 @@ def _increment_job_counters_and_finalize(
     """
     Increment counters with a single atomic UPDATE and finalize once all images
     are processed. Avoids FOR UPDATE row-lock deadlocks under concurrent workers.
+    Guards against CANCELLED and already-COMPLETED jobs.
     """
     values = {
         ProcessingJob.processed_images: func.coalesce(ProcessingJob.processed_images, 0) + 1,
@@ -342,13 +355,14 @@ def _increment_job_counters_and_finalize(
         values[ProcessingJob.approved_count] = func.coalesce(ProcessingJob.approved_count, 0) + 1
     elif decision == Decision.REJECTED:
         values[ProcessingJob.rejected_count] = func.coalesce(ProcessingJob.rejected_count, 0) + 1
-    else:
+    else:  # REVIEW or any unexpected value
         values[ProcessingJob.review_count] = func.coalesce(ProcessingJob.review_count, 0) + 1
 
+    # Atomic update: skip CANCELLED and already-COMPLETED jobs
     db.execute(
         update(ProcessingJob)
         .where(ProcessingJob.id == job_uuid)
-        .where(ProcessingJob.status != JobStatus.CANCELLED)
+        .where(ProcessingJob.status.notin_([JobStatus.CANCELLED, JobStatus.COMPLETED]))
         .values(values)
     )
 
@@ -356,14 +370,23 @@ def _increment_job_counters_and_finalize(
     if not job:
         return
 
+    # Only finalize if still in PROCESSING state and all images done
     if (
-        job.total_images
+        job.status == JobStatus.PROCESSING
+        and job.total_images
         and (job.processed_images or 0) >= job.total_images
-        and job.status != JobStatus.COMPLETED
     ):
         job.status = JobStatus.COMPLETED
         job.completed_at = now
         _generate_and_store_report(db, job)
+        log.info(
+            "job.completed",
+            job_id=str(job_uuid),
+            total=job.total_images,
+            approved=job.approved_count,
+            rejected=job.rejected_count,
+            review=job.review_count,
+        )
 
 
 @celery_app.task(name="app.worker.tasks.cleanup_stale_jobs")

@@ -112,7 +112,6 @@ class GoogleDriveService:
         total_fetched = 0
         all_files = []
         today = datetime.now(LOCAL_TZ).date()
-        stale_files = []
         low_quality_today = []
         missing_time_meta = []
 
@@ -142,15 +141,8 @@ class GoogleDriveService:
                     missing_time_meta.append(f.get("name", f.get("id", "unknown")))
                     continue
 
+                # Accept all images in the folder regardless of date
                 effective_date = effective_time.astimezone(LOCAL_TZ).date()
-                if effective_date != today:
-                    stale_files.append({
-                        "id": f["id"],
-                        "name": f["name"],
-                        "effective_time": effective_time.isoformat(),
-                        "effective_date": effective_date.isoformat(),
-                    })
-                    continue
 
                 size = int(f.get("size", 0))
                 if size < HD_MIN_BYTES:
@@ -170,13 +162,6 @@ class GoogleDriveService:
 
             page_token = response.get("nextPageToken")
             if not page_token:
-                if stale_files:
-                    stale_names = ", ".join(item["name"] for item in stale_files[:5])
-                    raise ValueError(
-                        "Drive folder contains images from a previous day. "
-                        f"Only images uploaded on {today.isoformat()} are allowed. "
-                        f"Stale files found: {stale_names}"
-                    )
                 if not all_files:
                     if missing_time_meta:
                         meta_names = ", ".join(missing_time_meta[:5])
@@ -185,7 +170,8 @@ class GoogleDriveService:
                             f"Examples: {meta_names}"
                         )
                     raise ValueError(
-                        f"No images uploaded today ({today.isoformat()}) were found in the Drive folder."
+                        f"No images (JPEG, PNG, WEBP) found in the Drive folder. "
+                        f"Ensure the folder contains images and the service account has Viewer access."
                     )
                 if low_quality_today and len(low_quality_today) == len(all_files):
                     log.warning(

@@ -8,7 +8,7 @@ from typing import Optional
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, ForeignKey,
-    Integer, JSON, String, Text, Enum, func, Index
+    Integer, JSON, String, Text, Enum, func, Index, LargeBinary
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -149,6 +149,7 @@ class ImageRecord(Base):
 
     # Storage
     storage_url = Column(String(1024), nullable=True)  # MinIO object path
+    image_data = Column(LargeBinary, nullable=True)     # Database backup of image content
 
     # Human override
     human_override = Column(Enum(ImageDecision), nullable=True)

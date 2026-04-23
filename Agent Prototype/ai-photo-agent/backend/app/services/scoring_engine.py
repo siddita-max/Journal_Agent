@@ -107,6 +107,10 @@ class ScoringEngine:
             policy_reasons.extend(policy_result.reasons)
 
         if policy_reasons:
+            # Add Qwen's explanation if available for more detail
+            if inference and inference.qwen and inference.qwen.rejection_explanation:
+                policy_reasons.append(f"AI Analysis: {inference.qwen.rejection_explanation}")
+
             return ScoreResult(
                 final_score=0.0,
                 decision=Decision.REJECTED,
@@ -129,6 +133,9 @@ class ScoringEngine:
         # ── 2. Quality Thresholds (Secondary) ───────────────────────
         quality_reasons = list(preprocess.rejection_reasons)
         if not preprocess.ok:
+            if inference and inference.qwen and inference.qwen.rejection_explanation:
+                quality_reasons.append(f"AI Analysis: {inference.qwen.rejection_explanation}")
+
             return ScoreResult(
                 final_score=0.0,
                 decision=Decision.REJECTED,
@@ -142,13 +149,18 @@ class ScoringEngine:
         resolution_score = self._resolution_score(preprocess)
         object_score = policy_result.compliance_score if policy_result else self._object_score(inference)
         aesthetic_score = self._aesthetic_score(preprocess, inference)
-        composition_score = (resolution_score + aesthetic_score) / 2.0
+        # Composition = how well aspect ratio + aesthetic align (used in breakdown)
+        ar = preprocess.aspect_ratio
+        GOOD_RATIOS = [1.0, 1.333, 1.5, 1.778]
+        ar_score = max(0.0, 1.0 - min(abs(ar - r) for r in GOOD_RATIOS))
+        composition_score = (ar_score + aesthetic_score) / 2.0
 
         final_score = (
             clip_score * self.w_clip
             + quality_score * self.w_quality
+            + resolution_score * self.w_resolution
             + object_score * self.w_object
-            + composition_score * self.w_aesthetic
+            + aesthetic_score * self.w_aesthetic
         )
         final_score = max(0.0, min(1.0, round(final_score, 4)))
 
@@ -163,19 +175,26 @@ class ScoringEngine:
         if policy_result and policy_result.flagged:
             reasons.extend(policy_result.reasons)
             decision = Decision.REVIEW
+        elif inference and inference.qwen and inference.qwen.safety_assessment == "review":
+            reasons.append(f"AI Flag: {inference.qwen.rejection_explanation or 'Context needs manual review'}")
+            decision = Decision.REVIEW
         elif final_score >= self.approved_threshold:
             decision = Decision.APPROVED
         elif final_score >= self.review_threshold:
             decision = Decision.REVIEW
         else:
             decision = Decision.REJECTED
+            # Add Qwen's explanation for soft-rejection too
+            if inference and inference.qwen and inference.qwen.rejection_explanation:
+                reasons.append(f"AI Feedback: {inference.qwen.rejection_explanation}")
 
         breakdown = {
             "weights": {
                 "clip_semantic_match": self.w_clip,
                 "image_quality": self.w_quality,
+                "resolution": self.w_resolution,
                 "safety_compliance": self.w_object,
-                "composition_score": self.w_aesthetic,
+                "aesthetic": self.w_aesthetic,
             },
             "scores": {
                 "clip": round(clip_score, 4),

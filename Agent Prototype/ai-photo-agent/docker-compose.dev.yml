@@ -66,9 +66,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - MINIO_ENDPOINT=minio:9000
       - DEVICE=auto
-      - CLIP_MODEL_NAME=auto
-      - YOLO_MODEL_PATH=auto
-      - YOLO_AUGMENT=false
+      # CLIP_MODEL_NAME and YOLO_MODEL_PATH intentionally NOT overridden here
+      # — the .env file values (ViT-L/14@336px, yolov8s.pt) are used directly
+      - QWEN_ENABLED=false
     volumes:
       - ./backend:/app
       - model_cache_dev:/root/.cache
@@ -95,9 +95,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - MINIO_ENDPOINT=minio:9000
       - DEVICE=auto
-      - CLIP_MODEL_NAME=auto
-      - YOLO_MODEL_PATH=auto
-      - YOLO_AUGMENT=false
+      # CLIP_MODEL_NAME and YOLO_MODEL_PATH intentionally NOT overridden here
+      # — the .env file values (ViT-L/14@336px, yolov8s.pt) are used directly
+      - QWEN_ENABLED=false
     volumes:
       - ./backend:/app
       - model_cache_dev:/root/.cache

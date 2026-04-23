@@ -8,9 +8,15 @@ from alembic import context
 from app.core.database import Base
 from app.models.models import *  # noqa: ensure all models are registered
 
+from app.core.config import settings
+
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Override sqlalchemy.url with value from Settings (handling async -> sync swap)
+sync_url = settings.DATABASE_URL.replace("+asyncpg", "+psycopg2")
+config.set_main_option("sqlalchemy.url", sync_url)
 
 target_metadata = Base.metadata
 

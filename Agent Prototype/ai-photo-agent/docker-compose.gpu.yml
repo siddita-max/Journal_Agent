@@ -1,0 +1,48 @@
+# GPU override — always used with docker-compose.dev.yml as the base:
+#
+#   docker compose -f docker-compose.dev.yml -f docker-compose.gpu.yml up --build
+#
+# This file only overrides what's different for GPU:
+#   - Dockerfile.gpu (CUDA PyTorch + bitsandbytes + transformers)
+#   - nvidia device reservation
+#   - DEVICE=cuda, correct model paths, QWEN_ENABLED=true
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.gpu
+      target: api
+    # API doesn't need GPU reservation if it's not doing inference
+    environment:
+      - DEVICE=cpu
+      - QWEN_ENABLED=false
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.gpu
+      target: worker
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-photo_agent}:${POSTGRES_PASSWORD:-photo_agent_secret}@postgres:5432/${POSTGRES_DB:-photo_agent_db}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - DEVICE=cuda
+      - CLIP_MODEL_NAME=ViT-L/14@336px
+      - YOLO_MODEL_PATH=/app/models/yolov8s.pt
+      - QWEN_ENABLED=true
+      - QWEN_MODEL_NAME=Qwen/Qwen2-VL-2B-Instruct
+      - QWEN_DEVICE=cuda
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.gpu
+      target: beat

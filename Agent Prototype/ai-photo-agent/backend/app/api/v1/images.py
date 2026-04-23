@@ -5,15 +5,18 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select, desc, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.models import ImageRecord, ImageDecision, AuditLog, FeedbackRecord
+from app.services.storage_service import StorageService
 
 log = structlog.get_logger()
 router = APIRouter()
+storage = StorageService()
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────
@@ -23,16 +26,25 @@ class ImageSummary(BaseModel):
     job_id: str = Field(..., description="Parent job UUID")
     filename: str = Field(..., description="Original filename from Google Drive")
     decision: Optional[str] = Field(None, description="AI classification: approved | rejected | review | pending")
+    effective_decision: Optional[str] = Field(None, description="Decision after applying any human override")
     final_score: Optional[float] = Field(None, description="Weighted composite score (0.0–1.0)")
     rejection_reasons: Optional[List[str]] = Field(None, description="Human-readable list of reasons for rejection or low score")
     width: Optional[int] = Field(None, description="Image width in pixels")
     height: Optional[int] = Field(None, description="Image height in pixels")
     people_count: Optional[int] = Field(None, description="Number of people detected by YOLOv8")
+    face_count: Optional[int] = Field(None, description="Alias for people_count (for frontend compatibility)")
+    student_count: Optional[int] = Field(None, description="Estimated number of students detected")
+    teacher_count: Optional[int] = Field(None, description="Estimated number of teachers detected")
     phone_detected: Optional[bool] = Field(None, description="Whether a mobile phone was detected in the frame")
     nsfw_detected: bool = Field(..., description="Whether NSFW content was detected (always triggers rejection)")
     storage_url: Optional[str] = Field(None, description="MinIO object path: bucket/filename")
+    preview_url: Optional[str] = Field(None, description="Temporary presigned URL for previewing the image (uses public MinIO endpoint)")
+    db_image_url: Optional[str] = Field(None, description="Stable fallback URL serving image bytes directly from the API/DB — always works regardless of MinIO reachability")
     human_override: Optional[str] = Field(None, description="Override decision set by a human reviewer")
     processed_at: Optional[datetime] = Field(None, description="Timestamp when AI processing completed")
+    ai_reason: Optional[str] = Field(None, description="Human-readable reason for the AI decision (computed from rejection_reasons or score_breakdown)")
+    role_classification: Optional[str] = Field(None, description="Detected role breakdown (e.g., 'Students: 5, Teachers: 1')")
+    detected_activity: Optional[str] = Field(None, description="Main activity detected by AI (e.g., classroom, outdoor, etc.)")
 
     class Config:
         from_attributes = True
@@ -133,7 +145,7 @@ async def list_images(
 
     if decision:
         try:
-            conditions.append(ImageRecord.decision == ImageDecision(decision))
+            conditions.append(func.coalesce(ImageRecord.human_override, ImageRecord.decision) == ImageDecision(decision))
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid decision: '{decision}'. Valid: approved, rejected, review, pending")
 
@@ -210,6 +222,36 @@ async def get_image(
     """
     img = await _get_image_or_404(image_id, db)
     return _to_detail(img)
+
+
+@router.get(
+    "/{image_id}/data",
+    summary="Stream raw image bytes from the database",
+    response_description="Raw image content (JPEG/PNG/WEBP) served directly from the DB.",
+    responses={
+        200: {"content": {"image/jpeg": {}, "image/png": {}, "image/webp": {}}},
+        404: {"description": "Image not found or no image data stored"},
+    },
+)
+async def get_image_data(
+    image_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Serve the raw image bytes stored in the database.
+
+    Use this as a reliable alternative to MinIO presigned URLs when the
+    MinIO hostname is not reachable from the browser (e.g. Docker-internal
+    hostname `minio:9000` producing `ERR_NAME_NOT_RESOLVED`).
+
+    The frontend can reference images as:
+      `<img src="/api/v1/images/{id}/data" />`
+    """
+    img = await _get_image_or_404(image_id, db)
+    if not img.image_data:
+        raise HTTPException(status_code=404, detail="No image data stored in database for this record")
+    content_type = img.mime_type or "image/jpeg"
+    return Response(content=img.image_data, media_type=content_type)
 
 
 @router.post(
@@ -294,21 +336,56 @@ async def _get_image_or_404(image_id: str, db: AsyncSession) -> ImageRecord:
 
 
 def _to_summary(img: ImageRecord) -> dict:
+    ai_reason = ""
+    if img.rejection_reasons and isinstance(img.rejection_reasons, list):
+        ai_reason = "; ".join(img.rejection_reasons)
+    if not ai_reason:
+        score_val = img.final_score if img.final_score is not None else 0.0
+        if score_val >= 0.75:
+            ai_reason = "Strong overall score. Image is high quality and matches policy."
+        elif score_val >= 0.60:
+            # Try to identify the bottleneck
+            scores = (img.score_breakdown or {}).get("scores", {})
+            if scores:
+                lowest_key = min(scores, key=scores.get)
+                lowest_val = scores[lowest_key]
+                ai_reason = f"Borderline result ({score_val:.3f}). Pulled down by {lowest_key} ({lowest_val:.2f})."
+            else:
+                ai_reason = f"Borderline evaluation score ({score_val:.3f})."
+        else:
+            ai_reason = f"Poor evaluation score ({score_val:.3f}). Multiple quality/policy flags."
+    
+    role_classification = "Unknown"
+    if img.student_count and img.teacher_count:
+        role_classification = f"Students: {img.student_count}, Teachers: {img.teacher_count}"
+    elif img.student_count:
+        role_classification = f"Students ({img.student_count})"
+    elif img.teacher_count:
+        role_classification = f"Teachers ({img.teacher_count})"
+    
     return {
         "id": str(img.id),
         "job_id": str(img.job_id),
         "filename": img.filename,
         "decision": img.decision.value if img.decision else None,
+        "effective_decision": (img.human_override.value if img.human_override else img.decision.value if img.decision else None),
         "final_score": img.final_score,
         "rejection_reasons": img.rejection_reasons or [],
         "width": img.width,
         "height": img.height,
         "people_count": img.people_count,
+        "face_count": img.people_count,  # Alias for frontend
         "phone_detected": img.phone_detected,
         "nsfw_detected": img.nsfw_detected or False,
         "storage_url": img.storage_url,
+        "preview_url": _preview_url(img.storage_url),
+        "db_image_url": f"/api/v1/images/{img.id}/data" if img.image_data else None,
         "human_override": img.human_override.value if img.human_override else None,
         "processed_at": img.processed_at,
+        "ai_reason": ai_reason,  # 🤖 NEW: Computed from reasons
+        "role_classification": role_classification,  # 🤖 NEW: Computed from student/teacher counts
+        "student_count": img.student_count,  # 🤖 NEW: Raw counts for reference
+        "teacher_count": img.teacher_count,
     }
 
 
@@ -327,5 +404,19 @@ def _to_detail(img: ImageRecord) -> dict:
         "detected_objects": img.detected_objects or [],
         "policy_violations": img.policy_violations or [],
         "policy_compliance_score": img.policy_compliance_score,
+        "preview_url": _preview_url(img.storage_url),
+        "db_image_url": f"/api/v1/images/{img.id}/data" if img.image_data else None,
+        "ai_reason": d.get("ai_reason", ""),  # Include from summary
+        "role_classification": d.get("role_classification", "Unknown"),  # Include from summary
     })
     return d
+
+
+def _preview_url(storage_url: Optional[str]) -> Optional[str]:
+    if not storage_url or "/" not in storage_url:
+        return None
+    bucket, object_name = storage_url.split("/", 1)
+    try:
+        return storage.get_presigned_url(bucket, object_name)
+    except Exception:
+        return None

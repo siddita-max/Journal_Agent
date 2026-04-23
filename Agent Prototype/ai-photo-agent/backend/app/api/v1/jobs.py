@@ -112,7 +112,6 @@ async def create_job(
     try:
         folder_id = extract_folder_id(payload.drive_folder_url)
         await _validate_folder_async(drive, folder_id)
-        await _validate_today_only_async(drive, folder_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -257,11 +256,6 @@ async def _validate_folder_async(drive: GoogleDriveService, folder_id: str):
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, drive.validate_folder_access, folder_id)
 
-
-async def _validate_today_only_async(drive: GoogleDriveService, folder_id: str):
-    import asyncio
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, lambda: list(drive.list_images(folder_id)))
 
 
 async def _get_or_404(job_id: str, db: AsyncSession) -> ProcessingJob:

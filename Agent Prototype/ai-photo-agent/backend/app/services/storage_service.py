@@ -20,17 +20,39 @@ class StorageService:
 
     def __init__(self):
         self._client: Optional[Minio] = None
+        self._public_client: Optional[Minio] = None
         self._initialized = False
 
     def _get_client(self) -> Minio:
+        """Return the internal client (uses Docker hostname — for server-side ops)."""
         if self._client is None:
+            endpoint = settings.MINIO_ENDPOINT
+            log.info("storage.init_client", endpoint=endpoint)
             self._client = Minio(
-                settings.MINIO_ENDPOINT,
+                endpoint,
                 access_key=settings.MINIO_ACCESS_KEY,
                 secret_key=settings.MINIO_SECRET_KEY,
                 secure=settings.MINIO_SECURE,
+                region="us-east-1",
             )
         return self._client
+
+    def _get_public_client(self) -> Minio:
+        """
+        Return a client pointed at the *public* MinIO endpoint.
+        This is used exclusively for generating presigned URLs that the
+        browser will open. When MINIO_PUBLIC_ENDPOINT is not set it falls
+        back to MINIO_ENDPOINT (same behaviour as before).
+        """
+        if self._public_client is None:
+            self._public_client = Minio(
+                settings.get_minio_public_endpoint(),
+                access_key=settings.MINIO_ACCESS_KEY,
+                secret_key=settings.MINIO_SECRET_KEY,
+                secure=settings.MINIO_SECURE,
+                region="us-east-1",
+            )
+        return self._public_client
 
     def ensure_buckets(self):
         """Create buckets if they don't exist (idempotent)."""
@@ -86,7 +108,8 @@ class StorageService:
                 length=len(payload),
                 content_type="application/json",
             )
-            url = client.presigned_get_object(
+            # Use public client so the URL is browser-accessible
+            url = self._get_public_client().presigned_get_object(
                 "reports", object_name, expires=timedelta(days=7)
             )
             log.info("storage.report_uploaded", job_id=job_id)
@@ -96,8 +119,11 @@ class StorageService:
             raise
 
     def get_presigned_url(self, bucket: str, object_name: str, expires_hours: int = 24) -> str:
-        """Generate a presigned URL for temporary access."""
-        client = self._get_client()
-        return client.presigned_get_object(
+        """
+        Generate a presigned URL for temporary browser access.
+        Uses the *public* MinIO endpoint so the URL resolves in the browser
+        (avoids the Docker-internal 'minio:9000' hostname leaking to clients).
+        """
+        return self._get_public_client().presigned_get_object(
             bucket, object_name, expires=timedelta(hours=expires_hours)
         )

@@ -1,12 +1,15 @@
 """
-AI Inference Layer — CLIP, YOLOv8, and Safety Model inference.
+AI Inference Layer — CLIP, YOLOv8, Qwen, and Safety Model inference.
 Models are singletons loaded once at worker startup.
 GPU batching is used for throughput efficiency.
+Qwen provides verification & activity refinement when CLIP/YOLO disagree.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import io
+import hashlib
+import gc
 
 import clip
 import numpy as np
@@ -73,6 +76,20 @@ SHARP_OBJECT_CLASSES = {"scissors", "knife", "fork"}
 ROLE_CONFIDENCE_MARGIN = 3.0
 ROLE_MIN_VOTE = 22.0
 
+# ─── Qwen Activity Categories ─────────────────────────────────────────────
+QWEN_ACTIVITY_CATEGORIES = [
+    "classroom_learning",
+    "outdoor_play",
+    "lunch_dining", 
+    "sports_activity",
+    "assembly_event",
+    "library_reading",
+    "hallway_movement",
+    "group_project",
+    "teacher_meeting",
+    "unknown",
+]
+
 
 # ─── Result Dataclasses ───────────────────────────────────────────────────
 
@@ -110,10 +127,26 @@ class SafetyResult:
 
 
 @dataclass
+class QwenResult:
+    """Qwen vision-language model results for verification & activity refinement."""
+    activity_classification: str = "unknown"
+    activity_description: str = ""        # NEW: Natural language description
+    activity_confidence: float = 0.0
+    people_count_estimate: Optional[int] = None
+    safety_assessment: str = "safe"
+    rejection_explanation: str = ""       # NEW: Why this image might be bad
+    notes: str = ""
+    used_for_verification: bool = False
+    verification_reason: str = ""
+    processing_time_ms: float = 0.0
+
+
+@dataclass
 class InferenceResult:
     clip: CLIPResult
     yolo: YOLOResult
     safety: SafetyResult
+    qwen: Optional[QwenResult] = None  # Filled when CLIP/YOLO disagree
 
 
 # ─── Model Registry (Singleton) ───────────────────────────────────────────
@@ -125,7 +158,10 @@ class ModelRegistry:
     _clip_preprocess = None
     _yolo_model = None
     _safety_model = None
+    _qwen_model = None
+    _qwen_processor = None
     _device: str = None
+    _qwen_cache: Dict[str, QwenResult] = {}  # Simple hash-based cache for Qwen results
 
     @classmethod
     def get_device(cls) -> str:
@@ -167,6 +203,78 @@ class ModelRegistry:
         return cls._safety_model
 
     @classmethod
+    def get_qwen(cls):
+        """Lazy-load Qwen2-VL model if enabled. Returns (model, processor) tuple or (None, None)."""
+        if not settings.QWEN_ENABLED:
+            return None, None
+        
+        if cls._qwen_model is None:
+            try:
+                from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+                device = settings.get_qwen_device()
+                model_name = settings.get_qwen_model_name()
+                log.info("inference.loading_qwen", model=model_name, device=device)
+                
+                cls._qwen_processor = AutoProcessor.from_pretrained(
+                    model_name,
+                    min_pixels=256 * 28 * 28,
+                    max_pixels=512 * 28 * 28,  # Keep memory low: max ~512 visual tokens
+                )
+
+                if device == "cpu":
+                    cls._qwen_model = Qwen2VLForConditionalGeneration.from_pretrained(
+                        model_name,
+                        torch_dtype=torch.float32,
+                        device_map="cpu",
+                    )
+                else:
+                    # 4-bit quantization: 2B model uses ~2 GB VRAM, well within RTX 3050 4 GB
+                    try:
+                        from transformers import BitsAndBytesConfig
+                        bnb_cfg = BitsAndBytesConfig(
+                            load_in_4bit=True,
+                            bnb_4bit_compute_dtype=torch.float16,
+                            bnb_4bit_use_double_quant=True,
+                            bnb_4bit_quant_type="nf4",
+                        )
+                        cls._qwen_model = Qwen2VLForConditionalGeneration.from_pretrained(
+                            model_name,
+                            quantization_config=bnb_cfg,
+                            device_map="auto",
+                            # Reserve 1.2GB for CLIP/YOLO/Context on 4GB cards
+                            max_memory={0: "2800MiB", "cpu": "16GiB"}
+                        )
+                        log.info("inference.qwen_4bit_quantized", max_mem="2800MiB")
+                    except ImportError:
+                        # bitsandbytes not available — fall back to fp16
+                        log.warning("inference.qwen_bnb_unavailable", msg="Install bitsandbytes for 4-bit quant")
+                        cls._qwen_model = Qwen2VLForConditionalGeneration.from_pretrained(
+                            model_name,
+                            torch_dtype=torch.float16,
+                            device_map="auto",
+                            max_memory={0: "2800MiB", "cpu": "16GiB"}
+                        )
+                
+                cls._qwen_model.eval()
+                log.info("inference.qwen_ready", model=model_name)
+            except ImportError as e:
+                log.warning("inference.qwen_unavailable", error=str(e))
+                cls._qwen_model = None
+                cls._qwen_processor = None
+            except Exception as e:
+                log.error("inference.qwen_load_failed", error=str(e))
+                cls._qwen_model = None
+                cls._qwen_processor = None
+        
+        return cls._qwen_model, cls._qwen_processor
+
+    @classmethod
+    def clear_qwen_cache(cls):
+        """Clear the Qwen result cache."""
+        cls._qwen_cache.clear()
+        log.info("inference.qwen_cache_cleared")
+
+    @classmethod
     def preload_all(cls) -> None:
         """
         Load the core models eagerly so the first request does not pay the cold-start cost.
@@ -175,6 +283,8 @@ class ModelRegistry:
         cls.get_clip()
         cls.get_yolo()
         cls.get_safety()
+        if settings.QWEN_ENABLED:
+            cls.get_qwen()
         log.info("inference.models_ready")
 
 
@@ -188,6 +298,257 @@ def ensemble_clip_score(image_features, prompts: List[str], model, preprocess=No
         image_features /= image_features.norm(dim=-1, keepdim=True)
         similarities = (image_features @ text_features.T).squeeze(0)
     return float(similarities.mean().item())
+
+
+# ─── Qwen Verification Engine ────────────────────────────────────────────
+
+class QwenVerifier:
+    """
+    Uses Qwen for verification when CLIP and YOLO disagree significantly.
+    Also refines activity classification when confidence is low.
+    Implements efficient caching and early-exit logic.
+    """
+
+    DISAGREEMENT_THRESHOLD = 0.25  # Disagreement if predictions differ by >25%
+    LOW_CONFIDENCE_THRESHOLD = 0.50  # Use Qwen if confidence < 50%
+    
+    @staticmethod
+    def _get_cache_key(image_bytes: bytes) -> str:
+        """Generate a hash-based cache key for an image."""
+        return hashlib.md5(image_bytes).hexdigest()
+    
+    @classmethod
+    def _check_disagreement(cls, clip_result: CLIPResult, yolo_result: YOLOResult) -> Tuple[bool, str]:
+        """
+        Detect significant disagreement between CLIP and YOLO.
+        Returns (has_disagreement, reason).
+        """
+        # Check 1: Activity type mismatch
+        clip_activity = clip_result.detected_activity.lower()
+        yolo_people = yolo_result.people_count
+        
+        # If CLIP says indoor classroom but YOLO detects 0 people
+        if "classroom" in clip_activity and yolo_people == 0:
+            return True, "clip_indoor_vs_yolo_no_people"
+        
+        # If CLIP says playground but YOLO detects minimal movement/people
+        if "playground" in clip_activity and yolo_people < 2:
+            return True, "clip_outdoor_vs_yolo_few_people"
+        
+        # Check 2: Safety flag mismatch
+        if yolo_result.sharp_object_detected and clip_result.semantic_score > 0.75:
+            return True, "yolo_risk_vs_clip_confidence"
+        
+        # Check 3: Confidence level mismatch
+        if clip_result.semantic_score < cls.LOW_CONFIDENCE_THRESHOLD:
+            if yolo_people > 0:  # YOLO has clear detections
+                return True, "clip_low_confidence_vs_yolo_detections"
+        
+        # Check 4: Activity confidence vs people count
+        if "unknown" in clip_activity and yolo_people >= 3:
+            return True, "clip_unknown_vs_yolo_group"
+        
+        return False, ""
+
+    @classmethod
+    def should_use_qwen(cls, clip_result: CLIPResult, yolo_result: YOLOResult) -> Tuple[bool, str]:
+        """
+        Determine if Qwen should be invoked.
+        Returns (should_use, reason).
+        """
+        if not settings.QWEN_ENABLED:
+            return False, "qwen_disabled"
+        
+        # Early exit: If confidence is high, skip Qwen
+        if clip_result.semantic_score > 0.85 and yolo_result.people_count > 0:
+            return False, "high_confidence"
+            
+        # Check for disagreement
+        has_disagreement, reason = cls._check_disagreement(clip_result, yolo_result)
+        if has_disagreement:
+            return True, f"disagreement_{reason}"
+            
+        # Fix Bug 5: Tighten threshold to avoid over-triggering Qwen
+        if clip_result.semantic_score < 0.25:
+            return True, "clip_very_low_confidence"
+        
+        return False, ""
+
+    @classmethod
+    def verify_and_refine(
+        cls,
+        image_bytes: bytes,
+        img_pil: Image.Image,
+        clip_result: CLIPResult,
+        yolo_result: YOLOResult,
+    ) -> Optional[QwenResult]:
+        """
+        Use Qwen to verify/refine results when CLIP and YOLO disagree.
+        Implements caching for efficiency.
+        Returns QwenResult or None.
+        """
+        should_use, reason = cls.should_use_qwen(clip_result, yolo_result)
+        if not should_use:
+            return None
+        
+        # Check cache
+        if settings.QWEN_CACHE_ENABLED:
+            cache_key = cls._get_cache_key(image_bytes)
+            if cache_key in ModelRegistry._qwen_cache:
+                cached = ModelRegistry._qwen_cache[cache_key]
+                log.info("inference.qwen_cache_hit", reason=reason)
+                return cached
+        
+        # Invoke Qwen
+        try:
+            import time
+            start_time = time.time()
+            
+            qwen_model, qwen_processor = ModelRegistry.get_qwen()
+            if qwen_model is None:
+                return None
+            
+            # Build the prompt
+            prompt = cls._build_prompt(clip_result, yolo_result)
+            device = settings.get_qwen_device()
+
+            # ── Qwen2-VL message format ──────────────────────────────────
+            from qwen_vl_utils import process_vision_info
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": img_pil},
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ]
+            text_input = qwen_processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            image_inputs, video_inputs = process_vision_info(messages)
+            inputs = qwen_processor(
+                text=[text_input],
+                images=image_inputs,
+                videos=video_inputs,
+                padding=True,
+                return_tensors="pt",
+            )
+            if device == "cuda":
+                inputs = inputs.to("cuda")
+            
+            with torch.no_grad():
+                outputs = qwen_model.generate(
+                    **inputs,
+                    max_new_tokens=150,
+                    do_sample=False,
+                )
+                # Trim prompt tokens from output
+                trimmed = outputs[:, inputs["input_ids"].shape[-1]:]
+                response = qwen_processor.batch_decode(
+                    trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+                )[0]
+            
+            # Clean up after heavy Qwen run
+            del inputs, outputs, trimmed
+            if device == "cuda":
+                torch.cuda.empty_cache()
+                gc.collect()
+            
+            # Parse response
+            qwen_result = cls._parse_qwen_response(response, time.time() - start_time, reason)
+            
+            # Cache result
+            if settings.QWEN_CACHE_ENABLED:
+                cache_key = cls._get_cache_key(image_bytes)
+                ModelRegistry._qwen_cache[cache_key] = qwen_result
+            
+            log.info(
+                "inference.qwen_verification_complete",
+                reason=reason,
+                activity=qwen_result.activity_classification,
+                confidence=qwen_result.activity_confidence,
+            )
+            
+            return qwen_result
+            
+        except Exception as e:
+            log.warning("inference.qwen_verification_failed", error=str(e), reason=reason)
+            return None
+
+    @staticmethod
+    def _build_prompt(clip_result: CLIPResult, yolo_result: YOLOResult) -> str:
+        """Build a targeted prompt for Qwen based on disagreement type."""
+        return f"""Analyze this school photo and answer:
+1. What is the primary activity happening? (classroom learning, outdoor play, lunch, sports, meeting, etc.)
+2. Approximately how many people can you see?
+3. Is this a safe, appropriate school/educational photo? (yes/no with brief reason)
+
+Current analysis:
+- CLIP thinks: {clip_result.detected_activity} (confidence: {clip_result.semantic_score:.2f})
+- YOLO detected: {yolo_result.people_count} people
+
+Please provide a brief, definitive assessment."""
+
+    @staticmethod
+    def _parse_qwen_response(response: str, processing_time: float, reason: str) -> QwenResult:
+        """Parse Qwen's response into structured QwenResult."""
+        response_lower = response.lower()
+        
+        # Detect activity type (mapped to categories)
+        activity_mapping = {
+            "classroom": "classroom_learning",
+            "outdoor": "outdoor_play",
+            "playground": "outdoor_play",
+            "lunch": "lunch_dining",
+            "sports": "sports_activity",
+            "assembly": "assembly_event",
+            "library": "library_reading",
+            "hallway": "hallway_movement",
+            "group": "group_project",
+            "meeting": "teacher_meeting",
+        }
+        
+        category = "unknown"
+        for key, val in activity_mapping.items():
+            if key in response_lower:
+                category = val
+                break
+        
+        # Extract 1-sentence description (usually the first part)
+        description = response.split("\n")[0].replace("ACTIVITY:", "").strip()
+        
+        # Rejection explanation
+        rejection_msg = ""
+        if "QUALITY:" in response:
+            rejection_msg = response.split("QUALITY:")[1].split("\n")[0].strip()
+        elif "rejected because" in response_lower:
+            rejection_msg = response_lower.split("rejected because")[1].split(".")[0].strip()
+
+        # People count
+        import re
+        people_estimate = None
+        match = re.search(r'(\d+)\s+(?:people|student|person|teacher|adult|child)', response_lower)
+        if not match:
+            match = re.search(r'(?:count|total|see)\s*:?\s*(\d+)', response_lower)
+        if match:
+            people_estimate = int(match.group(1))
+        
+        # Safety / Decision
+        is_safe = "yes" in response_lower.split("final decision")[-1] if "final decision" in response_lower else "yes" in response_lower
+        
+        return QwenResult(
+            activity_classification=category,
+            activity_description=description,
+            activity_confidence=0.85 if is_safe else 0.4,
+            people_count_estimate=people_estimate,
+            safety_assessment="safe" if is_safe else "review",
+            rejection_explanation=rejection_msg,
+            notes=response[:500],
+            used_for_verification=True,
+            verification_reason=reason,
+            processing_time_ms=processing_time * 1000,
+        )
 
 
 # ─── Inference Engine ─────────────────────────────────────────────────────
@@ -205,9 +566,13 @@ class InferenceEngine:
         user_text: Optional[str] = None,
         yolo_augment: Optional[bool] = None,
     ) -> InferenceResult:
-        """Run all models on a single image."""
+        """Run all models on a single image, using Qwen for verification when needed."""
         img_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         try:
+            # Clear cache before starting inference to maximize headroom
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             clip_result = self._run_clip(img_pil, user_text=user_text)
         except Exception as exc:
             log.exception(
@@ -220,11 +585,30 @@ class InferenceEngine:
         yolo_result = self._run_yolo(img_pil, augment=yolo_augment)
         yolo_result = self._maybe_refine_yolo_for_school_context(
             img_pil,
+            image_bytes,  # Now passing bytes for Qwen cache key
             yolo_result,
             clip_result,
             augment=yolo_augment,
             filename=filename,
         )
+        
+        # 🤖 NEW: Use Qwen for verification and refinement when needed
+        qwen_result = None
+        if settings.QWEN_ENABLED:
+            qwen_result = QwenVerifier.verify_and_refine(
+                image_bytes, img_pil, clip_result, yolo_result
+            )
+            # If Qwen provided verification, consider updating activity classification
+            if qwen_result and qwen_result.used_for_verification:
+                # Only override if Qwen confidence is high enough
+                if qwen_result.activity_confidence >= 0.75:
+                    clip_result.detected_activity = qwen_result.activity_classification
+                    log.info(
+                        "inference.activity_refined_by_qwen",
+                        original=clip_result.detected_activity,
+                        refined=qwen_result.activity_classification,
+                    )
+        
         safety_result = self._run_safety(image_bytes)
 
         # 🏫 School-Context Safeguard:
@@ -248,6 +632,7 @@ class InferenceEngine:
             clip=clip_result,
             yolo=yolo_result,
             safety=safety_result,
+            qwen=qwen_result,
         )
 
     def run_batch(
@@ -259,6 +644,7 @@ class InferenceEngine:
         """
         GPU-batched inference for throughput efficiency.
         Falls back to sequential if batch fails.
+        Integrates Qwen verification for improved accuracy.
         """
         results = []
         try:
@@ -274,16 +660,30 @@ class InferenceEngine:
                     error=str(exc),
                 )
                 clip_results = [self._empty_clip_result() for _ in pil_images]
+            
             for i, img_bytes in enumerate(image_batch):
                 clip_res = clip_results[i]
                 yolo_res = self._run_yolo(pil_images[i], augment=yolo_augment)
+                
+                # Fix Bug 1: Correct argument passing to _maybe_refine_yolo_for_school_context
                 yolo_res = self._maybe_refine_yolo_for_school_context(
                     pil_images[i],
+                    img_bytes,
                     yolo_res,
                     clip_res,
                     augment=yolo_augment,
                     image_index=i,
                 )
+                
+                # 🤖 NEW: Qwen verification per image in batch
+                qwen_res = None
+                if settings.QWEN_ENABLED:
+                    qwen_res = QwenVerifier.verify_and_refine(
+                        img_bytes, pil_images[i], clip_res, yolo_res
+                    )
+                    if qwen_res and qwen_res.used_for_verification and qwen_res.activity_confidence >= 0.75:
+                        clip_res.detected_activity = qwen_res.activity_classification
+                
                 safety_res = self._run_safety(img_bytes)
 
                 # 🏫 Unified School Shield
@@ -302,6 +702,7 @@ class InferenceEngine:
                     clip=clip_res,
                     yolo=yolo_res,
                     safety=safety_res,
+                    qwen=qwen_res,
                 ))
         except Exception as e:
             log.warning("inference.batch_fallback", error=str(e))
@@ -334,7 +735,6 @@ class InferenceEngine:
         image_tensors = torch.stack([preprocess(img) for img in images]).to(device)
 
         results = []
-        n_pos = len(POSITIVE_PROMPTS)
 
         # School-specific activity prompts
         activity_prompts = [
@@ -381,6 +781,10 @@ class InferenceEngine:
                 journal_scores[key] = scores
 
         for i, sim in enumerate(similarity):
+            # Fix Bug 2: Use softmax similarity for positive/negative scores
+            pos_score = float(np.sum(sim[:len(POSITIVE_PROMPTS)]))
+            neg_score = float(np.sum(sim[len(POSITIVE_PROMPTS):]))
+
             # Detect activity (excluding user_text)
             img_act_sims = act_similarity[i][:len(activity_prompts)]
             best_act_idx = np.argmax(img_act_sims)
@@ -402,12 +806,14 @@ class InferenceEngine:
                 key: round(float(scores[i]), 4)
                 for key, scores in journal_scores.items()
             }
+            # Fix Bug 4: Normalize semantic_score properly using cosine [-1,1] -> [0,1]
             if user_text_idx == -1:
-                match_score = max(0.0, min(1.0, prompt_scores.get("activity_learning", 0.0) + 0.5))
+                raw_al = prompt_scores.get("activity_learning", 0.0)
+                match_score = max(0.0, min(1.0, (raw_al + 1.0) / 2.0))
 
             results.append(CLIPResult(
-                positive_score=prompt_scores.get("quality_positive", 0.0),
-                negative_score=prompt_scores.get("setting_nonschool_private", 0.0),
+                positive_score=round(pos_score, 4),
+                negative_score=round(neg_score, 4),
                 semantic_score=round(match_score, 4),
                 detected_activity=detected_activity,
                 match_active=(user_text is not None),
@@ -418,6 +824,7 @@ class InferenceEngine:
     def _maybe_refine_yolo_for_school_context(
         self,
         img_pil: Image.Image,
+        image_bytes: bytes,
         yolo_result: YOLOResult,
         clip_result: CLIPResult,
         augment: Optional[bool] = None,
@@ -444,10 +851,26 @@ class InferenceEngine:
                 imgsz=1280,
                 augment=use_augment,
             )
-            fallback = self._build_yolo_result_from_raw(
+            fallback = self._process_yolo_results(
                 img_pil=img_pil,
-                raw_results=fallback_results,
+                results=fallback_results,
+                clip_result=clip_result,
+                filename=filename,
+                image_index=image_index,
+                augment=augment
             )
+            
+            # 🤖 Qwen verification boost for school context refinement
+            if settings.QWEN_ENABLED:
+                qwen_res = QwenVerifier.verify_and_refine(
+                    image_bytes, img_pil, clip_result, fallback
+                )
+                if qwen_res and qwen_res.used_for_verification:
+                    # If Qwen confirms more people than YOLO, trust Qwen
+                    if qwen_res.people_count_estimate is not None and qwen_res.people_count_estimate > fallback.people_count:
+                        fallback.people_count = qwen_res.people_count_estimate
+                        fallback.uncertain_count = max(0, fallback.people_count - fallback.student_count - fallback.teacher_count)
+
             if fallback.people_count > yolo_result.people_count:
                 log.info(
                     "inference.yolo_fallback_applied",
@@ -467,11 +890,30 @@ class InferenceEngine:
             )
         return yolo_result
 
-    def _build_yolo_result_from_raw(
+    def _run_yolo(self, img_pil: Image.Image, augment: Optional[bool] = None) -> YOLOResult:
+        """Run standard YOLO detection pass."""
+        model = ModelRegistry.get_yolo()
+        use_augment = settings.YOLO_AUGMENT if augment is None else augment
+        results = model(
+            img_pil,
+            verbose=False,
+            conf=0.35,
+            iou=0.45,
+            imgsz=1280,
+            augment=use_augment,
+        )
+        return self._process_yolo_results(img_pil, results, augment=augment)
+
+    def _process_yolo_results(
         self,
         img_pil: Image.Image,
-        raw_results,
+        results: Any,
+        clip_result: Optional[CLIPResult] = None,
+        filename: str = "",
+        image_index: Optional[int] = None,
+        augment: Optional[bool] = None
     ) -> YOLOResult:
+        """Unified processing logic for YOLO raw results, handling role detection and compliance."""
         model = ModelRegistry.get_yolo()
         detections = []
         flagged_objects = []
@@ -479,19 +921,18 @@ class InferenceEngine:
         phone_detected = False
         laptop_detected = False
         person_estimates: List[Dict[str, Any]] = []
-        detected_activity = []
         person_boxes = []
 
-        for result in raw_results:
+        for result in results:
             for box in result.boxes:
                 cls_id = int(box.cls[0])
                 conf = float(box.conf[0])
                 label = model.names[cls_id]
                 coords = box.xyxy[0].cpu().numpy().tolist()
 
+                # Anti-Ghosting: Ignore very small detections
                 img_area = img_pil.width * img_pil.height
                 box_area = (coords[2] - coords[0]) * (coords[3] - coords[1])
-
                 if label.lower() == "person" and (box_area / img_area) < 0.02:
                     continue
 
@@ -505,7 +946,6 @@ class InferenceEngine:
                 if cls_id == YOLO_PERSON_CLASS:
                     people_count += 1
                     person_boxes.append(coords)
-                    detected_activity.append({"class": "person", "confidence": round(conf, 3)})
                 elif cls_id == YOLO_PHONE_CLASS:
                     phone_detected = True
                 elif cls_id == YOLO_LAPTOP_CLASS:
@@ -535,31 +975,27 @@ class InferenceEngine:
             if people_count <= 8:
                 for coords in person_boxes:
                     try:
-                        w = coords[2] - coords[0]
-                        h = coords[3] - coords[1]
+                        w, h = coords[2] - coords[0], coords[3] - coords[1]
                         pad_w, pad_h = w * 0.15, h * 0.15
-
-                        left = max(0, coords[0] - pad_w)
-                        top = max(0, coords[1] - pad_h)
-                        right = min(img_pil.width, coords[2] + pad_w)
-                        bottom = min(img_pil.height, coords[3] + pad_h)
-
-                        person_crop = img_pil.crop((left, top, right, bottom))
+                        person_crop = img_pil.crop((
+                            max(0, coords[0] - pad_w),
+                            max(0, coords[1] - pad_h),
+                            min(img_pil.width, coords[2] + pad_w),
+                            min(img_pil.height, coords[3] + pad_h)
+                        ))
+                        
                         estimated_age = self._estimate_age(person_crop)
                         if estimated_age is not None:
                             role = "student" if estimated_age < 18 else "teacher"
-                            confidence = "low" if 15 <= estimated_age <= 21 else "high"
                             person_estimates.append({
                                 "box": [round(v, 2) for v in coords],
                                 "estimated_age": round(float(estimated_age), 1),
                                 "role": role,
-                                "confidence": confidence,
+                                "confidence": "high" if (estimated_age < 14 or estimated_age > 24) else "medium",
                                 "source": "deepface",
                             })
-                            if role == "student":
-                                student_count += 1
-                            else:
-                                teacher_count += 1
+                            if role == "student": student_count += 1
+                            else: teacher_count += 1
                             continue
 
                         img_tensor = preprocess(person_crop).unsqueeze(0).to(device)
@@ -572,65 +1008,45 @@ class InferenceEngine:
 
                         student_vote = np.mean(sims[:3])
                         teacher_vote = np.mean(sims[3:])
-                        vote_gap = abs(float(student_vote) - float(teacher_vote))
-                        best_vote = max(float(student_vote), float(teacher_vote))
-                        if best_vote < ROLE_MIN_VOTE or vote_gap < ROLE_CONFIDENCE_MARGIN:
-                            person_estimates.append({
-                                "box": [round(v, 2) for v in coords],
-                                "estimated_age": None,
-                                "role": "uncertain",
-                                "confidence": "low",
-                                "source": "clip_fallback",
-                            })
+                        
+                        # Fix Bug 2: Check clip_result.detected_activity (string) instead of list
+                        if clip_result and "Teacher meeting" in clip_result.detected_activity:
+                            teacher_vote += 5.0
+
+                        if max(student_vote, teacher_vote) < ROLE_MIN_VOTE or abs(student_vote - teacher_vote) < ROLE_CONFIDENCE_MARGIN:
+                            role, source = "uncertain", "clip_fallback"
                         elif student_vote > teacher_vote:
-                            student_count += 1
-                            person_estimates.append({
-                                "box": [round(v, 2) for v in coords],
-                                "estimated_age": None,
-                                "role": "student",
-                                "confidence": "medium",
-                                "source": "clip_fallback",
-                            })
+                            role, source, student_count = "student", "clip_fallback", student_count + 1
                         else:
-                            teacher_count += 1
-                            person_estimates.append({
-                                "box": [round(v, 2) for v in coords],
-                                "estimated_age": None,
-                                "role": "teacher",
-                                "confidence": "medium",
-                                "source": "clip_fallback",
-                            })
-                    except Exception as exc:
-                        log.warning("inference.crop_failed", error=str(exc))
+                            role, source, teacher_count = "teacher", "clip_fallback", teacher_count + 1
+                        
                         person_estimates.append({
                             "box": [round(v, 2) for v in coords],
-                            "estimated_age": None,
-                            "role": "uncertain",
-                            "confidence": "low",
-                            "source": "error",
+                            "role": role,
+                            "confidence": "medium",
+                            "source": source,
                         })
+                    except Exception as exc:
+                        log.warning("inference.person_proc_failed", error=str(exc))
+                        person_estimates.append({"box": coords, "role": "uncertain", "source": "error"})
             else:
+                # Batch fallback for crowds
                 img_tensor = preprocess(img_pil).unsqueeze(0).to(device)
                 with torch.no_grad():
-                    img_features = clip_model.encode_image(img_tensor)
-                    role_features = clip_model.encode_text(role_tokens)
-                    img_features /= img_features.norm(dim=-1, keepdim=True)
-                    role_features /= role_features.norm(dim=-1, keepdim=True)
-                    probs = (img_features @ role_features.T).softmax(dim=-1).cpu().numpy()[0]
-
-                if abs(float(probs[0]) - float(probs[1])) < 0.15:
-                    pass
-                elif probs[0] > probs[1]:
+                    img_f = clip_model.encode_image(img_tensor)
+                    role_f = clip_model.encode_text(role_tokens)
+                    img_f /= img_f.norm(dim=-1, keepdim=True)
+                    role_f /= role_f.norm(dim=-1, keepdim=True)
+                    sims = (100.0 * img_f @ role_f.T).cpu().numpy()[0]
+                
+                student_vote = np.mean(sims[:3])
+                teacher_vote = np.mean(sims[3:])
+                if student_vote > teacher_vote:
                     student_count = people_count
                     teacher_count = 0
                 else:
                     teacher_count = 1
-                    student_count = people_count - 1
-
-        compliance = 1.0
-        if flagged_objects:
-            compliance = 0.0
-        compliance = max(0.0, compliance)
+                    student_count = max(0, people_count - 1)
 
         return YOLOResult(
             people_count=people_count,
@@ -642,233 +1058,8 @@ class InferenceEngine:
             laptop_detected=laptop_detected,
             sharp_object_detected=len(flagged_objects) > 0,
             flagged_objects=flagged_objects,
-            detected_activity=detected_activity,
             detections=detections,
-            compliance_score=round(compliance, 4),
-        )
-
-
-    # ── YOLO ─────────────────────────────────────────────────────────
-
-    def _run_yolo(self, img_pil: Image.Image, augment: Optional[bool] = None) -> YOLOResult:
-        model = ModelRegistry.get_yolo()
-        detected_activity = []
-        use_augment = settings.YOLO_AUGMENT if augment is None else augment
-        results = model(
-            img_pil,
-            verbose=False,
-            conf=0.35,
-            iou=0.45,
-            imgsz=1280,
-            augment=use_augment,
-        )
-
-        detections = []
-        flagged_objects = []
-        people_count = 0
-        phone_detected = False
-        laptop_detected = False
-        person_estimates: List[Dict[str, Any]] = []
-
-        # Prepare for role classification (Students vs Teachers)
-        person_boxes = []
-
-        for result in results:
-            for box in result.boxes:
-                cls_id = int(box.cls[0])
-                conf = float(box.conf[0])
-                label = model.names[cls_id]
-                coords = box.xyxy[0].cpu().numpy().tolist()
-
-                # Anti-Ghosting: Ignore very small detections (likely posters or background clutter)
-                # Area check: if person box is less than 2% of the total image area, ignore it
-                img_area = img_pil.width * img_pil.height
-                box_area = (coords[2] - coords[0]) * (coords[3] - coords[1])
-                
-                if label.lower() == "person" and (box_area / img_area) < 0.02:
-                    continue
-
-                detections.append({
-                    "class": label,
-                    "confidence": round(conf, 3),
-                    "class_id": cls_id,
-                    "box": coords
-                })
-
-                if cls_id == YOLO_PERSON_CLASS:
-                    people_count += 1
-                    person_boxes.append(coords)
-                    detected_activity.append({"class": "person", "confidence": round(conf, 3)})
-                elif cls_id == YOLO_PHONE_CLASS:
-                    phone_detected = True
-                elif cls_id == YOLO_LAPTOP_CLASS:
-                    laptop_detected = True
-
-                if label.lower() in SHARP_OBJECT_CLASSES:
-                    flagged_objects.append({
-                        "class": label,
-                        "confidence": round(conf, 3),
-                    })
-
-        # Role Classification: Student vs Teacher
-        student_count = 0
-        teacher_count = 0
-
-        if people_count > 0:
-            clip_model, preprocess = ModelRegistry.get_clip()
-            device = ModelRegistry.get_device()
-            # High-contrast Ensemble Prompts for definitive Role Detection
-            role_prompts = [
-                "a young primary school child, student, small elementary pupil",
-                "a small kid with a young round juvenile face and child features",
-                "a young child sitting at a school desk",
-                "a fully grown adult teacher, professional faculty, mature face",
-                "a mature adult woman or man with adult facial features",
-                "a professional grown person in adult teacher attire"
-            ]
-            role_tokens = clip.tokenize(role_prompts).to(device)
-
-            # For each detected person, crop and classify
-            if people_count <= 8:
-                for d in detections:
-                    if d["class"].lower() != "person":
-                        continue
-                    
-                    try:
-                        box = d["box"]
-                        # Pad the crop slightly to see height/clothing
-                        w = box[2] - box[0]
-                        h = box[3] - box[1]
-                        pad_w, pad_h = w * 0.15, h * 0.15
-                        
-                        left = max(0, box[0] - pad_w)
-                        top = max(0, box[1] - pad_h)
-                        right = min(img_pil.width, box[2] + pad_w)
-                        bottom = min(img_pil.height, box[3] + pad_h)
-                        
-                        person_crop = img_pil.crop((left, top, right, bottom))
-                        estimated_age = self._estimate_age(person_crop)
-                        if estimated_age is not None:
-                            role = "student" if estimated_age < 18 else "teacher"
-                            confidence = "low" if 15 <= estimated_age <= 21 else "high"
-                            d["estimated_age"] = round(float(estimated_age), 1)
-                            d["age_confidence"] = confidence
-                            d["role_source"] = "deepface"
-                            d["suggested_role"] = role
-                            person_estimates.append({
-                                "box": [round(v, 2) for v in box],
-                                "estimated_age": round(float(estimated_age), 1),
-                                "role": role,
-                                "confidence": confidence,
-                                "source": "deepface",
-                            })
-                            if role == "student":
-                                student_count += 1
-                            else:
-                                teacher_count += 1
-                            continue
-
-                        img_tensor = preprocess(person_crop).unsqueeze(0).to(device)
-                        
-                        with torch.no_grad():
-                            img_f = clip_model.encode_image(img_tensor)
-                            role_f = clip_model.encode_text(role_tokens)
-                            img_f /= img_f.norm(dim=-1, keepdim=True)
-                            role_f /= role_f.norm(dim=-1, keepdim=True)
-                            
-                            # Calculate raw similarities
-                            sims = (100.0 * img_f @ role_f.T).cpu().numpy()[0]
-                        
-                        # Ensemble Vote: First 3 are Students, Last 3 are Teachers
-                        student_vote = np.mean(sims[:3])
-                        teacher_vote = np.mean(sims[3:])
-                        
-                        # Context-Aware Boost: If it's a teacher meeting, adults are highly likely
-                        if "Teacher meeting" in detected_activity:
-                            teacher_vote += 5.0 # Significant boost for adult roles in professional settings
-                        
-                        vote_gap = abs(float(student_vote) - float(teacher_vote))
-                        best_vote = max(float(student_vote), float(teacher_vote))
-                        if best_vote < ROLE_MIN_VOTE or vote_gap < ROLE_CONFIDENCE_MARGIN:
-                            d["suggested_role"] = "unknown"
-                            person_estimates.append({
-                                "box": [round(v, 2) for v in box],
-                                "estimated_age": None,
-                                "role": "uncertain",
-                                "confidence": "low",
-                                "source": "clip_fallback",
-                            })
-                        elif student_vote > teacher_vote:
-                            d["suggested_role"] = "student"
-                            student_count += 1
-                            person_estimates.append({
-                                "box": [round(v, 2) for v in box],
-                                "estimated_age": None,
-                                "role": "student",
-                                "confidence": "medium",
-                                "source": "clip_fallback",
-                            })
-                        else:
-                            d["suggested_role"] = "teacher"
-                            teacher_count += 1
-                            person_estimates.append({
-                                "box": [round(v, 2) for v in box],
-                                "estimated_age": None,
-                                "role": "teacher",
-                                "confidence": "medium",
-                                "source": "clip_fallback",
-                            })
-                    except Exception as e:
-                        log.warning("inference.crop_failed", error=str(e))
-                        d["suggested_role"] = "unknown"
-                        # Keep the role conservative when the crop-based heuristic is unsure.
-                        # The policy engine will treat unassigned people as uncategorized.
-                        person_estimates.append({
-                            "box": [round(v, 2) for v in d.get("box", [])],
-                            "estimated_age": None,
-                            "role": "uncertain",
-                            "confidence": "low",
-                            "source": "error",
-                        })
-                        pass
-            else:
-                # Fallback for crowded photos
-                img_tensor = preprocess(img_pil).unsqueeze(0).to(device)
-                with torch.no_grad():
-                    img_features = clip_model.encode_image(img_tensor)
-                    role_features = clip_model.encode_text(role_tokens)
-                    img_features /= img_features.norm(dim=-1, keepdim=True)
-                    role_features /= role_features.norm(dim=-1, keepdim=True)
-                    probs = (img_features @ role_features.T).softmax(dim=-1).cpu().numpy()[0]
-                
-                if abs(float(probs[0]) - float(probs[1])) < 0.15:
-                    pass
-                elif probs[0] > probs[1]:
-                    student_count = people_count
-                    teacher_count = 0
-                else:
-                    teacher_count = 1
-                    student_count = people_count - 1
-
-        # Compliance score
-        compliance = 1.0
-        if flagged_objects:
-            compliance = 0.0
-        compliance = max(0.0, compliance)
-
-        return YOLOResult(
-            people_count=people_count,
-            student_count=student_count,
-            teacher_count=teacher_count,
-            uncertain_count=max(0, people_count - student_count - teacher_count),
-            person_estimates=person_estimates,
-            phone_detected=phone_detected,
-            laptop_detected=laptop_detected,
-            sharp_object_detected=len(flagged_objects) > 0,
-            flagged_objects=flagged_objects,
-            detected_activity=detected_activity,
-            detections=detections,
-            compliance_score=round(compliance, 4),
+            compliance_score=0.0 if phone_detected or len(flagged_objects) > 0 else 1.0,
         )
 
     # ── Safety ───────────────────────────────────────────────────────

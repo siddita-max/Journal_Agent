@@ -24,8 +24,9 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    task_acks_late=True,           # Re-queue if worker crashes
-    worker_prefetch_multiplier=1,  # Fair task distribution
+    task_acks_late=True,                    # Re-queue if worker crashes
+    worker_prefetch_multiplier=1,           # Fair task distribution
+    broker_connection_retry_on_startup=True,  # Suppress Celery 6.0 deprecation
     task_routes={
         "app.worker.tasks.process_photo_job": {"queue": "photo_processing"},
         "app.worker.tasks.process_single_image": {"queue": "photo_processing"},
@@ -50,6 +51,15 @@ def warm_up_models(**kwargs):
         ModelRegistry.get_clip()
         ModelRegistry.get_yolo()
         ModelRegistry.get_safety()
+        # Qwen is large (~7 GB) — only warm up if it's enabled AND the model
+        # is already cached locally. If not cached it will be skipped at
+        # inference time and CLIP/YOLO results will be used directly.
+        if settings.QWEN_ENABLED:
+            try:
+                ModelRegistry.get_qwen()
+                log.info("inference.qwen_warmup_complete")
+            except Exception as qwen_exc:
+                log.warning("inference.qwen_warmup_skipped", error=str(qwen_exc))
         log.info("inference.warmup_complete")
     except Exception as exc:
         log.warning("inference.warmup_failed", error=str(exc))

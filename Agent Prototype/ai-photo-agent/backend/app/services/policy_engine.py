@@ -72,12 +72,12 @@ SCHOOL_CHILD_SAFETY_POLICY: Dict[str, Any] = {
     "max_people": 10,
     "prohibited_objects": ["cell phone"],
     "quality_gates": {
-        "min_resolution": [1280, 720],
-        "preferred_resolution": [1920, 1080],
-        "min_sharpness_score": 80,
+        "min_resolution": [100, 100],
+        "preferred_resolution": [800, 600],
+        "min_sharpness_score": 30,
         "min_brightness": 40,
         "max_brightness": 220,
-        "blur_threshold": 120,
+        "blur_threshold": 30,
         "allowed_formats": ["jpeg", "jpg", "png", "webp"],
         "reject_if_any_fail": True,
     },
@@ -120,7 +120,7 @@ SCHOOL_CHILD_SAFETY_POLICY: Dict[str, Any] = {
     ],
     "journal_matching": {
         "enabled": True,
-        "clip_similarity_threshold": 0.28,
+        "clip_similarity_threshold": 0.22,
         "reject_below_threshold": True,
         "strategy": "per_image_independent",
         "note": "Each image is scored against journal description independently — no dependency on previous photos",
@@ -132,7 +132,7 @@ SCHOOL_CHILD_SAFETY_POLICY: Dict[str, Any] = {
         "composition_score": 0.10,
     },
     "decision_thresholds": {
-        "approve": 0.72,
+        "approve": 0.70,
         "review": 0.50,
         "reject": 0.0,
     },
@@ -220,6 +220,31 @@ class PolicyEngine:
                 yolo_result=yolo_result,
                 clip_result=clip_result,
             )
+
+        # ── 0. Quality Gates ──────────────────────────────────────────
+        gates = self.policy.get("quality_gates", {})
+        if gates and preprocess_result:
+            min_res = gates.get("min_resolution", [0, 0])
+            if preprocess_result.width < min_res[0] or preprocess_result.height < min_res[1]:
+                result.violations.append(PolicyViolation(
+                    rule_name="min_resolution",
+                    severity="hard",
+                    description=f"Resolution below policy minimum ({preprocess_result.width}x{preprocess_result.height})",
+                    measured_value=f"{preprocess_result.width}x{preprocess_result.height}",
+                    threshold=f"{min_res[0]}x{min_res[1]}",
+                ))
+                result.hard_rejected = True
+
+            min_bright = gates.get("min_brightness", 0)
+            if preprocess_result.brightness < min_bright:
+                result.violations.append(PolicyViolation(
+                    rule_name="min_brightness",
+                    severity="hard",
+                    description="Image too dark",
+                    measured_value=round(preprocess_result.brightness, 1),
+                    threshold=min_bright,
+                ))
+                result.hard_rejected = True
 
         # ── 1. People count ──────────────────────────────────────────
         max_people = self.policy.get("max_people", 10)
