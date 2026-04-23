@@ -45,6 +45,7 @@ class ImageSummary(BaseModel):
     ai_reason: Optional[str] = Field(None, description="Human-readable reason for the AI decision (computed from rejection_reasons or score_breakdown)")
     role_classification: Optional[str] = Field(None, description="Detected role breakdown (e.g., 'Students: 5, Teachers: 1')")
     detected_activity: Optional[str] = Field(None, description="Main activity detected by AI (e.g., classroom, outdoor, etc.)")
+    activity_description: Optional[str] = Field(None, description="Natural language description of the scene")
 
     class Config:
         from_attributes = True
@@ -347,9 +348,14 @@ def _to_summary(img: ImageRecord) -> dict:
             # Try to identify the bottleneck
             scores = (img.score_breakdown or {}).get("scores", {})
             if scores:
-                lowest_key = min(scores, key=scores.get)
-                lowest_val = scores[lowest_key]
-                ai_reason = f"Borderline result ({score_val:.3f}). Pulled down by {lowest_key} ({lowest_val:.2f})."
+                # Filter out non-numeric values (like 'resolution_tier') for comparison
+                numeric_scores = {k: v for k, v in scores.items() if isinstance(v, (int, float))}
+                if numeric_scores:
+                    lowest_key = min(numeric_scores, key=numeric_scores.get)
+                    lowest_val = numeric_scores[lowest_key]
+                    ai_reason = f"Borderline result ({score_val:.3f}). Pulled down by {lowest_key} ({lowest_val:.2f})."
+                else:
+                    ai_reason = f"Borderline evaluation score ({score_val:.3f})."
             else:
                 ai_reason = f"Borderline evaluation score ({score_val:.3f})."
         else:
@@ -384,6 +390,8 @@ def _to_summary(img: ImageRecord) -> dict:
         "processed_at": img.processed_at,
         "ai_reason": ai_reason,  # 🤖 NEW: Computed from reasons
         "role_classification": role_classification,  # 🤖 NEW: Computed from student/teacher counts
+        "detected_activity": img.detected_activity or "Unknown",  # 🤖 NEW: Main activity detected
+        "activity_description": img.activity_description,        # 🤖 NEW: Description from Qwen
         "student_count": img.student_count,  # 🤖 NEW: Raw counts for reference
         "teacher_count": img.teacher_count,
     }

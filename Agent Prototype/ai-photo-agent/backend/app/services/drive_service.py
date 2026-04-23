@@ -141,23 +141,19 @@ class GoogleDriveService:
                     missing_time_meta.append(f.get("name", f.get("id", "unknown")))
                     continue
 
-                # Accept all images in the folder regardless of date
+                # Date validation: Check if image is from today (local time)
                 effective_date = effective_time.astimezone(LOCAL_TZ).date()
-
-                size = int(f.get("size", 0))
-                if size < HD_MIN_BYTES:
-                    low_quality_today.append({
-                        "id": f["id"],
-                        "name": f["name"],
-                        "size": size,
-                    })
+                is_wrong_date = (effective_date != today)
+                size_val = int(f.get("size", 0))
 
                 all_files.append({
                     "id": f["id"],
                     "name": f["name"],
                     "mime_type": f.get("mimeType", ""),
-                    "size": size,
+                    "size": size_val,
                     "created_time": (created_time or effective_time).isoformat(),
+                    "is_wrong_date": is_wrong_date,
+                    "actual_date": str(effective_date),
                 })
 
             page_token = response.get("nextPageToken")

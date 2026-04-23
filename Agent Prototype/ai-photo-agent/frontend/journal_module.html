@@ -413,8 +413,9 @@
                   <p id="modalFaceCount" class="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-1">1</p>
                 </div>
                 <div class="col-span-2 p-3 rounded-xl bg-teal-50/50 dark:bg-teal-900/20 border border-teal-100/50 dark:border-teal-800/50">
-                  <p class="text-[9px] font-bold text-teal-600 dark:text-teal-400 uppercase tracking-widest">AI Detected Activity</p>
+                  <p class="text-[9px] font-bold text-teal-600 dark:text-teal-400 uppercase tracking-widest">AI Scene Analysis</p>
                   <p id="modalActivity" class="text-sm font-bold text-slate-700 dark:text-slate-200 mt-1 capitalize">Classroom Learning</p>
+                  <p id="modalActivityDesc" class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">Students focused at desks with books.</p>
                 </div>
               </div>
             </div>
@@ -488,6 +489,7 @@
           modalRole: document.getElementById("modalRole"),
           modalFaceCount: document.getElementById("modalFaceCount"),
           modalActivity: document.getElementById("modalActivity"),
+          modalActivityDesc: document.getElementById("modalActivityDesc"),
           modalBtnApprove: document.getElementById("modalBtnApprove"),
           modalBtnReject: document.getElementById("modalBtnReject"),
           modalBtnNext: document.getElementById("modalBtnNext"),
@@ -504,6 +506,7 @@
           currentModalLane: null,        // Track which lane (approved/review/rejected) we're viewing
           currentModalLaneImages: [],    // All images in the current lane
           currentModalImageIndex: 0,     // Current position in lane
+          seenImageIds: new Set(),       // Track for activity stream
         };
 
         function nowLabel() {
@@ -694,13 +697,17 @@
             meta.className = "text-[10px] text-slate-400";
             const score = Number.isFinite(Number(img.final_score)) ? Number(img.final_score).toFixed(3) : "-";
             meta.textContent = `Score ${score}`;
-            const activity = document.createElement("p");
-            activity.className = "text-[9px] font-bold text-teal-600/80 mt-0.5 truncate capitalize";
-            activity.textContent = img.detected_activity || "No activity detected";
-            
-            left.appendChild(name);
-            left.appendChild(meta);
-            left.appendChild(activity);
+            if (tone === "rejected" && img.rejection_reasons && img.rejection_reasons.length > 0) {
+              const reason = document.createElement("p");
+              reason.className = "text-[9px] font-medium text-red-500 mt-0.5 line-clamp-2 leading-tight";
+              reason.textContent = img.rejection_reasons[0];
+              left.appendChild(reason);
+            } else {
+              const activity = document.createElement("p");
+              activity.className = "text-[9px] font-bold text-teal-600/80 mt-0.5 truncate capitalize";
+              activity.textContent = img.detected_activity || "No activity detected";
+              left.appendChild(activity);
+            }
 
             const chip = document.createElement("span");
             chip.className =
@@ -754,6 +761,7 @@
           els.modalRole.textContent = img.role_classification || "Unknown";
           els.modalFaceCount.textContent = img.face_count !== undefined ? img.face_count : "-";
           els.modalActivity.textContent = img.detected_activity || "General School Scene";
+          els.modalActivityDesc.textContent = img.activity_description || "No detailed scene description available.";
           
           // Update Next button visibility and label
           const hasNext = laneImages.length > 0 && laneIndex < laneImages.length - 1;
@@ -917,17 +925,33 @@
 
         async function refreshReviewLanes(jobId) {
           if (!jobId) return;
-          const [approved, review, rejected] = await Promise.all([
+          const [approved, review, rejected, stats] = await Promise.all([
             loadJobImages(jobId, "approved"),
             loadJobImages(jobId, "review"),
             loadJobImages(jobId, "rejected"),
+            loadJobStats(jobId),
           ]);
           renderDecisionCards(els.approvedList, approved, "approved", jobId);
           renderDecisionCards(els.reviewList, review, "review", jobId);
           renderDecisionCards(els.rejectedList, rejected, "rejected", jobId);
-          els.approvedCountLive.textContent = String(approved.length);
-          els.reviewCountLive.textContent = String(review.length);
-          els.rejectedCountLive.textContent = String(rejected.length);
+          
+          const d = (stats && stats.decisions) ? stats.decisions : {};
+          els.approvedCountLive.textContent = String(d.approved ? d.approved.count : approved.length);
+          els.reviewCountLive.textContent = String(d.review ? d.review.count : review.length);
+          els.rejectedCountLive.textContent = String(d.rejected ? d.rejected.count : rejected.length);
+
+          // 🤖 NEW: Live activity stream logging
+          const allImages = [...approved, ...review, ...rejected];
+          for (const img of allImages) {
+            if (!state.seenImageIds.has(img.id)) {
+              state.seenImageIds.add(img.id);
+              if (img.detected_activity && img.detected_activity !== "Unknown") {
+                const decision = (img.decision || "").toLowerCase();
+                const color = decision === "approved" ? "bg-teal-400" : decision === "review" ? "bg-amber-400" : "bg-red-400";
+                addActivity(`AI detected "${img.detected_activity}" in ${img.filename}`, "SUCCESS", color);
+              }
+            }
+          }
         }
 
         async function pollJob(jobId) {
@@ -960,7 +984,8 @@
 
         async function loadJobImages(jobId, decision) {
           // Keep it light: first page only.
-          let path = `/api/v1/images/?job_id=${encodeURIComponent(jobId)}&limit=12&offset=0`;
+          // Increase limit to 100 to show more images in the dashboard
+          let path = `/api/v1/images/?job_id=${encodeURIComponent(jobId)}&limit=100&offset=0`;
           if (decision) path += `&decision=${encodeURIComponent(decision)}`;
           return await apiGet(path);
         }

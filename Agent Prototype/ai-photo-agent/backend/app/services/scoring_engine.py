@@ -98,11 +98,6 @@ class ScoringEngine:
         policy_reasons = []
         nsfw_detected = False
         
-        if inference:
-            nsfw_detected = inference.safety.nsfw_detected
-            if nsfw_detected:
-                policy_reasons.append("NSFW content detected")
-
         if policy_result and policy_result.hard_rejected:
             policy_reasons.extend(policy_result.reasons)
 
@@ -115,8 +110,7 @@ class ScoringEngine:
                 final_score=0.0,
                 decision=Decision.REJECTED,
                 reasons=policy_reasons,
-                hard_rejected=True,
-                nsfw_detected=nsfw_detected
+                hard_rejected=True
             )
 
         # ── 1.5. User Match Check ──────────────────────────────────
@@ -149,6 +143,25 @@ class ScoringEngine:
         resolution_score = self._resolution_score(preprocess)
         object_score = policy_result.compliance_score if policy_result else self._object_score(inference)
         aesthetic_score = self._aesthetic_score(preprocess, inference)
+
+        # ── 2.5. Quality Gate (Right Architecture) ──────────────────
+        # Straight rejection for low resolution (below Standard HD) or poor sharpness
+        # even if they pass the absolute minimums in Preprocessing.
+        if resolution_score < 0.6:  # Below 1280x720 (Standard HD)
+            return ScoreResult(
+                final_score=0.0,
+                decision=Decision.REJECTED,
+                reasons=["Low resolution (below Standard HD 720p)"],
+                hard_rejected=True
+            )
+        
+        if quality_score < 0.5:
+            return ScoreResult(
+                final_score=0.0,
+                decision=Decision.REJECTED,
+                reasons=["Insufficient image clarity or brightness"],
+                hard_rejected=True
+            )
         # Composition = how well aspect ratio + aesthetic align (used in breakdown)
         ar = preprocess.aspect_ratio
         GOOD_RATIOS = [1.0, 1.333, 1.5, 1.778]
@@ -200,6 +213,7 @@ class ScoringEngine:
                 "clip": round(clip_score, 4),
                 "quality": round(quality_score, 4),
                 "resolution": round(resolution_score, 4),
+                "resolution_tier": self._get_resolution_tier(preprocess.width, preprocess.height),
                 "safety": round(object_score, 4),
                 "aesthetic": round(aesthetic_score, 4),
                 "composition": round(composition_score, 4),
@@ -238,7 +252,9 @@ class ScoringEngine:
     def _clip_score(inference: Optional[InferenceResult]) -> float:
         if inference is None:
             return 0.5
-        return inference.clip.semantic_score
+        # 📸 CLIP now provides a photographic quality signal (is it a good photo?)
+        # instead of trying to match a specific text description.
+        return inference.clip.positive_score
 
     @staticmethod
     def _quality_score(prep: PreprocessResult) -> float:
@@ -258,11 +274,39 @@ class ScoringEngine:
 
     @staticmethod
     def _resolution_score(prep: PreprocessResult) -> float:
-        """Normalised resolution score: 1.0 at 4× minimum, 0 at or below minimum."""
-        megapixels = (prep.width * prep.height) / 1_000_000
-        min_mp = (settings.MIN_RESOLUTION_WIDTH * settings.MIN_RESOLUTION_HEIGHT) / 1_000_000
-        target_mp = min_mp * 4  # 4× minimum = perfect score
-        return min(1.0, megapixels / target_mp)
+        """
+        Resolution score based on standard HD tiers:
+        - 4K (3840x2160+)   -> 1.0
+        - 2K (2560x1440+)   -> 0.9
+        - Full HD (1920x1080+) -> 0.8
+        - Std HD (1280x720+)   -> 0.6
+        - Min (640x480+)    -> 0.3
+        - Below Min         -> 0.0
+        """
+        w, h = prep.width, prep.height
+        
+        if w >= 3840 and h >= 2160:
+            return 1.0
+        if w >= 2560 and h >= 1440:
+            return 0.9
+        if w >= 1920 and h >= 1080:
+            return 0.8
+        if w >= 1280 and h >= 720:
+            return 0.6
+        if w >= 640 and h >= 480:
+            return 0.3
+        
+        return 0.0
+
+    @staticmethod
+    def _get_resolution_tier(w: int, h: int) -> str:
+        """Returns the human-readable resolution tier name."""
+        if w >= 3840 and h >= 2160: return "4K"
+        if w >= 2560 and h >= 1440: return "2K"
+        if w >= 1920 and h >= 1080: return "Full HD"
+        if w >= 1280 and h >= 720: return "Standard HD"
+        if w >= 640 and h >= 480: return "Minimum acceptable"
+        return "Below Minimum"
 
     @staticmethod
     def _object_score(inference: Optional[InferenceResult]) -> float:

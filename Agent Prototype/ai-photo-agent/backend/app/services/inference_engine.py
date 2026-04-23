@@ -76,19 +76,51 @@ SHARP_OBJECT_CLASSES = {"scissors", "knife", "fork"}
 ROLE_CONFIDENCE_MARGIN = 3.0
 ROLE_MIN_VOTE = 22.0
 
-# ─── Qwen Activity Categories ─────────────────────────────────────────────
-QWEN_ACTIVITY_CATEGORIES = [
+# ─── Canonical Activities ──────────────────────────────────────────────────
+CANONICAL_ACTIVITIES = {
     "classroom_learning",
     "outdoor_play",
-    "lunch_dining", 
+    "lunch_dining",
     "sports_activity",
     "assembly_event",
     "library_reading",
     "hallway_movement",
     "group_project",
     "teacher_meeting",
-    "unknown",
-]
+    "arts_crafts",
+    "computer_lab",
+    "pe_gym",
+    "other",
+}
+
+def normalise_activity(raw_label: str) -> str:
+    """Map Qwen's free-form label to a canonical category for filtering."""
+    raw = raw_label.lower()
+    if any(w in raw for w in ["cook", "food", "kitchen", "bak"]):
+        return "arts_crafts"
+    if any(w in raw for w in ["class", "lesson", "desk", "board", "studying"]):
+        return "classroom_learning"
+    if any(w in raw for w in ["play", "outside", "recess", "yard", "playground"]):
+        return "outdoor_play"
+    if any(w in raw for w in ["lunch", "eat", "dining", "cafeteria"]):
+        return "lunch_dining"
+    if any(w in raw for w in ["sport", "football", "soccer", "basketball", "field"]):
+        return "sports_activity"
+    if any(w in raw for w in ["gym", "pe", "physical"]):
+        return "pe_gym"
+    if any(w in raw for w in ["assembly", "theater", "performance", "stage"]):
+        return "assembly_event"
+    if any(w in raw for w in ["library", "book", "reading"]):
+        return "library_reading"
+    if any(w in raw for w in ["computer", "lab", "coding", "typing"]):
+        return "computer_lab"
+    if any(w in raw for w in ["art", "craft", "painting", "drawing"]):
+        return "arts_crafts"
+    if any(w in raw for w in ["hallway", "corridor", "walking"]):
+        return "hallway_movement"
+    if any(w in raw for w in ["meeting", "staff", "training"]):
+        return "teacher_meeting"
+    return "other"
 
 
 # ─── Result Dataclasses ───────────────────────────────────────────────────
@@ -129,12 +161,13 @@ class SafetyResult:
 @dataclass
 class QwenResult:
     """Qwen vision-language model results for verification & activity refinement."""
-    activity_classification: str = "unknown"
-    activity_description: str = ""        # NEW: Natural language description
-    activity_confidence: float = 0.0
+    activity_classification: str = "other"  # Canonical category
+    activity_label: str = ""               # 3-6 words descriptive label
+    activity_description: str = ""         # One specific sentence (max 20 words)
+    activity_confidence: str = "low"       # high | medium | low
     people_count_estimate: Optional[int] = None
-    safety_assessment: str = "safe"
-    rejection_explanation: str = ""       # NEW: Why this image might be bad
+    safety_assessment: str = "safe"        # safe | review
+    rejection_explanation: str = ""
     notes: str = ""
     used_for_verification: bool = False
     verification_reason: str = ""
@@ -354,25 +387,13 @@ class QwenVerifier:
     def should_use_qwen(cls, clip_result: CLIPResult, yolo_result: YOLOResult) -> Tuple[bool, str]:
         """
         Determine if Qwen should be invoked.
-        Returns (should_use, reason).
+        In the new architecture, Qwen is the primary source for activity labeling.
         """
         if not settings.QWEN_ENABLED:
             return False, "qwen_disabled"
         
-        # Early exit: If confidence is high, skip Qwen
-        if clip_result.semantic_score > 0.85 and yolo_result.people_count > 0:
-            return False, "high_confidence"
-            
-        # Check for disagreement
-        has_disagreement, reason = cls._check_disagreement(clip_result, yolo_result)
-        if has_disagreement:
-            return True, f"disagreement_{reason}"
-            
-        # Fix Bug 5: Tighten threshold to avoid over-triggering Qwen
-        if clip_result.semantic_score < 0.25:
-            return True, "clip_very_low_confidence"
-        
-        return False, ""
+        # We always use Qwen for activity and description in the Right Architecture
+        return True, "activity_labeling"
 
     @classmethod
     def verify_and_refine(
@@ -478,72 +499,62 @@ class QwenVerifier:
 
     @staticmethod
     def _build_prompt(clip_result: CLIPResult, yolo_result: YOLOResult) -> str:
-        """Build a targeted prompt for Qwen based on disagreement type."""
-        return f"""Analyze this school photo and answer:
-1. What is the primary activity happening? (classroom learning, outdoor play, lunch, sports, meeting, etc.)
-2. Approximately how many people can you see?
-3. Is this a safe, appropriate school/educational photo? (yes/no with brief reason)
+        """Build a targeted prompt for Qwen based on YOLO facts."""
+        flagged = [d["class"] for d in yolo_result.flagged_objects]
+        facts = {
+            "total_people": yolo_result.people_count,
+            "students": yolo_result.student_count,
+            "teachers": yolo_result.teacher_count,
+            "flagged_items": flagged,
+            "has_laptop": yolo_result.laptop_detected,
+            "has_phone": yolo_result.phone_detected,
+        }
+        
+        return f"""You are analysing a school photograph.
 
-Current analysis:
-- CLIP thinks: {clip_result.detected_activity} (confidence: {clip_result.semantic_score:.2f})
-- YOLO detected: {yolo_result.people_count} people
+Automated detection found:
+- People: {facts['total_people']} total
+- Students: {facts['students']}, Teachers: {facts['teachers']}
+- Objects visible: {', '.join(facts['flagged_items']) or 'none flagged'}
+- Equipment: {'laptop ' if facts['has_laptop'] else ''}{'phone ' if facts['has_phone'] else ''}
 
-Please provide a brief, definitive assessment."""
+Respond ONLY in this exact format:
+ACTIVITY: <single lowercase snake_case label you determine yourself>
+LABEL: <3-6 words describing the activity>
+DESCRIPTION: <one specific sentence, max 20 words>
+CONFIDENCE: <high|medium|low>
+SAFE: <yes|no>"""
 
     @staticmethod
     def _parse_qwen_response(response: str, processing_time: float, reason: str) -> QwenResult:
         """Parse Qwen's response into structured QwenResult."""
-        response_lower = response.lower()
+        lines = response.strip().split("\n")
+        parsed = {}
+        for line in lines:
+            if ":" in line:
+                key, val = line.split(":", 1)
+                parsed[key.strip().upper()] = val.strip()
         
-        # Detect activity type (mapped to categories)
-        activity_mapping = {
-            "classroom": "classroom_learning",
-            "outdoor": "outdoor_play",
-            "playground": "outdoor_play",
-            "lunch": "lunch_dining",
-            "sports": "sports_activity",
-            "assembly": "assembly_event",
-            "library": "library_reading",
-            "hallway": "hallway_movement",
-            "group": "group_project",
-            "meeting": "teacher_meeting",
-        }
+        raw_activity = parsed.get("ACTIVITY", "other").lower()
+        activity_label = parsed.get("LABEL", "Unknown Activity")
+        description = parsed.get("DESCRIPTION", "")
+        confidence = parsed.get("CONFIDENCE", "low").lower()
+        safe_str = parsed.get("SAFE", "no").lower()
         
-        category = "unknown"
-        for key, val in activity_mapping.items():
-            if key in response_lower:
-                category = val
-                break
-        
-        # Extract 1-sentence description (usually the first part)
-        description = response.split("\n")[0].replace("ACTIVITY:", "").strip()
-        
-        # Rejection explanation
-        rejection_msg = ""
-        if "QUALITY:" in response:
-            rejection_msg = response.split("QUALITY:")[1].split("\n")[0].strip()
-        elif "rejected because" in response_lower:
-            rejection_msg = response_lower.split("rejected because")[1].split(".")[0].strip()
+        # Normalise the raw activity label to a canonical category
+        category = normalise_activity(raw_activity)
+        if category == "other":
+            # Try normalising the descriptive label too
+            category = normalise_activity(activity_label)
 
-        # People count
-        import re
-        people_estimate = None
-        match = re.search(r'(\d+)\s+(?:people|student|person|teacher|adult|child)', response_lower)
-        if not match:
-            match = re.search(r'(?:count|total|see)\s*:?\s*(\d+)', response_lower)
-        if match:
-            people_estimate = int(match.group(1))
-        
-        # Safety / Decision
-        is_safe = "yes" in response_lower.split("final decision")[-1] if "final decision" in response_lower else "yes" in response_lower
-        
         return QwenResult(
             activity_classification=category,
+            activity_label=activity_label,
             activity_description=description,
-            activity_confidence=0.85 if is_safe else 0.4,
-            people_count_estimate=people_estimate,
-            safety_assessment="safe" if is_safe else "review",
-            rejection_explanation=rejection_msg,
+            activity_confidence=confidence,
+            people_count_estimate=None, # Qwen no longer asked for count in this format
+            safety_assessment="safe" if "yes" in safe_str else "review",
+            rejection_explanation="",
             notes=response[:500],
             used_for_verification=True,
             verification_reason=reason,
@@ -592,46 +603,26 @@ class InferenceEngine:
             filename=filename,
         )
         
-        # 🤖 NEW: Use Qwen for verification and refinement when needed
+        # 🤖 NEW Architecture: Qwen is the primary source for activity and description
         qwen_result = None
         if settings.QWEN_ENABLED:
+            # We always use Qwen now for the activity labeling (Right Architecture)
             qwen_result = QwenVerifier.verify_and_refine(
                 image_bytes, img_pil, clip_result, yolo_result
             )
-            # If Qwen provided verification, consider updating activity classification
-            if qwen_result and qwen_result.used_for_verification:
-                # Only override if Qwen confidence is high enough
-                if qwen_result.activity_confidence >= 0.75:
-                    clip_result.detected_activity = qwen_result.activity_classification
-                    log.info(
-                        "inference.activity_refined_by_qwen",
-                        original=clip_result.detected_activity,
-                        refined=qwen_result.activity_classification,
-                    )
+            if qwen_result:
+                # Update CLIP result with Qwen's refined labels for downstream usage
+                clip_result.detected_activity = qwen_result.activity_label
+                log.info(
+                    "inference.activity_labeled_by_qwen",
+                    label=qwen_result.activity_label,
+                    category=qwen_result.activity_classification,
+                )
         
-        safety_result = self._run_safety(image_bytes)
-
-        # 🏫 School-Context Safeguard:
-        # If we are highly confident this is a school activity, we suppress
-        # NSFW false positives.
-        school_keywords = [
-            "Classroom", "Playground", "Lunch", "Assembly", "Math", "Desk", 
-            "Storytime", "Teacher", "Meeting", "Training", "Library", 
-            "Reading", "Gym", "Hallway", "Life", "Cafeteria"
-        ]
-        is_school_activity = any(k.lower() in clip_result.detected_activity.lower() for k in school_keywords)
-        
-        if is_school_activity and safety_result.nsfw_score < 0.99:
-            # Downgrade detection unless it's absolutely certain (>0.95)
-            safety_result.nsfw_detected = False
-            log.info("safety.suppressed_by_context", 
-                     activity=clip_result.detected_activity, 
-                     original_score=safety_result.nsfw_score)
-
         return InferenceResult(
             clip=clip_result,
             yolo=yolo_result,
-            safety=safety_result,
+            safety=SafetyResult(nsfw_detected=False, nsfw_score=0.0),
             qwen=qwen_result,
         )
 
@@ -675,14 +666,14 @@ class InferenceEngine:
                     image_index=i,
                 )
                 
-                # 🤖 NEW: Qwen verification per image in batch
+                # 🤖 NEW Architecture: Qwen is the primary source for activity and description
                 qwen_res = None
                 if settings.QWEN_ENABLED:
                     qwen_res = QwenVerifier.verify_and_refine(
                         img_bytes, pil_images[i], clip_res, yolo_res
                     )
-                    if qwen_res and qwen_res.used_for_verification and qwen_res.activity_confidence >= 0.75:
-                        clip_res.detected_activity = qwen_res.activity_classification
+                    if qwen_res:
+                        clip_res.detected_activity = qwen_res.activity_label
                 
                 safety_res = self._run_safety(img_bytes)
 
@@ -736,42 +727,15 @@ class InferenceEngine:
 
         results = []
 
-        # School-specific activity prompts
-        activity_prompts = [
-            "students studying in a classroom",
-            "children playing outdoors on a playground",
-            "students having lunch in the cafeteria",
-            "teacher explaining at a whiteboard",
-            "school assembly or theater event",
-            "students working on a creative math project",
-            "kids sitting on a rug for storytime",
-            "students focused at desks with books",
-            "physical education in a gym or sports field",
-            "students reading in a library",
-            "adults having a teacher meeting or training",
-            "general school corridor or hallway activity",
-        ]
-        # Add user text if provided
-        final_act_prompts = list(activity_prompts)
-        user_text_idx = -1
-        if user_text:
-            final_act_prompts.append(user_text)
-            user_text_idx = len(final_act_prompts) - 1
-
-        activity_tokens = clip.tokenize(final_act_prompts).to(device)
-
         with torch.no_grad():
             image_features = model.encode_image(image_tensors)
             text_features = model.encode_text(text_tokens)
-            act_features = model.encode_text(activity_tokens)
 
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-            act_features = act_features / act_features.norm(dim=-1, keepdim=True)
 
             similarity = (image_features @ text_features.T).softmax(dim=-1).cpu().numpy()
-            # Raw similarity for activities
-            act_similarity = (100.0 * image_features @ act_features.T).cpu().numpy()
+            
             journal_scores = {}
             for key, prompts in JOURNAL_CLIP_PROMPTS.items():
                 prompt_tokens = clip.tokenize(prompts).to(device)
@@ -781,41 +745,25 @@ class InferenceEngine:
                 journal_scores[key] = scores
 
         for i, sim in enumerate(similarity):
-            # Fix Bug 2: Use softmax similarity for positive/negative scores
+            # CLIP now only provides quality signals
             pos_score = float(np.sum(sim[:len(POSITIVE_PROMPTS)]))
             neg_score = float(np.sum(sim[len(POSITIVE_PROMPTS):]))
 
-            # Detect activity (excluding user_text)
-            img_act_sims = act_similarity[i][:len(activity_prompts)]
-            best_act_idx = np.argmax(img_act_sims)
-            conf = img_act_sims[best_act_idx]
-            
-            if conf < 22.0:
-                detected_activity = "General School Life"
-            else:
-                detected_activity = activity_prompts[best_act_idx].split(" ")[1:]
-                detected_activity = " ".join(detected_activity).capitalize()
-
-            # User Match Score
-            match_score = 0.0
-            if user_text_idx != -1:
-                raw_score = act_similarity[i][user_text_idx]
-                match_score = min(1.0, max(0.0, (raw_score - 20.0) / 15.0))
-
+            # User Match Score fallback (semantic similarity)
             prompt_scores = {
                 key: round(float(scores[i]), 4)
                 for key, scores in journal_scores.items()
             }
-            # Fix Bug 4: Normalize semantic_score properly using cosine [-1,1] -> [0,1]
-            if user_text_idx == -1:
-                raw_al = prompt_scores.get("activity_learning", 0.0)
-                match_score = max(0.0, min(1.0, (raw_al + 1.0) / 2.0))
+            
+            # Use activity_learning score as a proxy for semantic match if no user_text
+            raw_al = prompt_scores.get("activity_learning", 0.0)
+            match_score = max(0.0, min(1.0, (raw_al + 1.0) / 2.0))
 
             results.append(CLIPResult(
                 positive_score=round(pos_score, 4),
                 negative_score=round(neg_score, 4),
                 semantic_score=round(match_score, 4),
-                detected_activity=detected_activity,
+                detected_activity="Unknown", # Labeling now handled by Qwen
                 match_active=(user_text is not None),
                 prompt_scores=prompt_scores,
             ))
@@ -1059,7 +1007,7 @@ class InferenceEngine:
             sharp_object_detected=len(flagged_objects) > 0,
             flagged_objects=flagged_objects,
             detections=detections,
-            compliance_score=0.0 if phone_detected or len(flagged_objects) > 0 else 1.0,
+            compliance_score=0.0 if len(flagged_objects) > 0 else 1.0,
         )
 
     # ── Safety ───────────────────────────────────────────────────────

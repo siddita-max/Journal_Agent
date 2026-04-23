@@ -78,9 +78,9 @@ class Settings(BaseSettings):
     SCORE_REVIEW_THRESHOLD: float = 0.60
 
     # ── Preprocessing Limits ─────────────────────────────────────────
-    MIN_RESOLUTION_WIDTH: int = 100
-    MIN_RESOLUTION_HEIGHT: int = 100
-    MIN_BLUR_VARIANCE: float = 30.0
+    MIN_RESOLUTION_WIDTH: int = 640
+    MIN_RESOLUTION_HEIGHT: int = 480
+    MIN_BLUR_VARIANCE: float = 100.0  # Increased for "clear not blur" requirement
     MIN_BRIGHTNESS: int = 40
     MAX_BRIGHTNESS: int = 220
     MIN_ASPECT_RATIO: float = 0.5

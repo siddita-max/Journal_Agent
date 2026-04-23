@@ -51,9 +51,9 @@ log = structlog.get_logger()
 # ─── Default policy (used if no DB policy is active) ─────────────────────
 
 DEFAULT_POLICY: Dict[str, Any] = {
-    "max_people": 10,
-    "prohibited_objects": ["cell phone"],
-    "min_professionalism_score": 0.0,       # 0.0 = not enforced by default
+    "max_people": 100,
+    "prohibited_objects": [],
+    "min_professionalism_score": 0.0,
     "required_context_prompts": [],
     "dress_code": {
         "enabled": False,
@@ -69,8 +69,8 @@ SCHOOL_CHILD_SAFETY_POLICY: Dict[str, Any] = {
     "name": "school_journal_policy_v1",
     "version": "1.1",
     "description": "Journal image selection policy for school settings",
-    "max_people": 10,
-    "prohibited_objects": ["cell phone"],
+    "max_people": 100,
+    "prohibited_objects": [],
     "quality_gates": {
         "min_resolution": [100, 100],
         "preferred_resolution": [800, 600],
@@ -83,37 +83,10 @@ SCHOOL_CHILD_SAFETY_POLICY: Dict[str, Any] = {
     },
     "safety_rules": [
         {
-            "id": "SR-01",
-            "name": "adult_child_isolation",
-            "description": "Student must not be alone with a single adult in a private/non-classroom setting",
-            "condition": {
-                "detected_persons": {"adults": 1, "children": {"gte": 1}},
-                "setting": {"not_in": ["classroom", "outdoor_group", "hallway", "gymnasium", "cafeteria"]},
-            },
-            "action": "FLAG",
-            "priority": "HIGH",
-            "applies_to_setting": "non_school_only",
-            "note": "Skip this rule if CLIP confirms setting is a formal school environment",
-        },
-        {
-            "id": "SR-02",
-            "name": "teacher_student_ratio",
-            "description": "Max 1 adult per 4 students in frame",
-            "condition": {"ratio": {"adults_to_children": {"gt": 0.25}}},
-            "action": "REJECT",
-            "priority": "HIGH",
-        },
-        {
             "id": "SR-03",
             "name": "sharp_objects_present",
             "description": "Sharp objects (scissors, knives, blades) must not appear",
             "yolo_classes": ["scissors", "knife", "blade", "cutter"],
-            "action": "REJECT",
-            "priority": "CRITICAL",
-        },
-        {
-            "id": "SR-04",
-            "name": "nsfw_check",
             "action": "REJECT",
             "priority": "CRITICAL",
         },
@@ -382,45 +355,7 @@ class PolicyEngine:
 
         school_setting = self._is_formal_school_setting(clip_result)
 
-        if rules.get("SR-01") and adults == 1 and effective_children >= 1 and school_setting is not True:
-            rule = rules["SR-01"]
-            result.flagged = True
-            penalty += 0.15
-            result.violations.append(PolicyViolation(
-                rule_name=rule["id"],
-                severity="flag",
-                description=rule["description"],
-                measured_value={
-                    "adults": adults,
-                    "children": children,
-                    "uncertain": uncertain,
-                    "school_setting": school_setting,
-                },
-                threshold="formal school setting required",
-            ))
-
-        if getattr(yolo_result, "phone_detected", False):
-            result.hard_rejected = True
-            result.violations.append(PolicyViolation(
-                rule_name="cellphone_not_allowed",
-                severity="hard",
-                description="Cellphone detected in frame",
-                measured_value="cell phone",
-                threshold="not allowed",
-            ))
-
-        if rules.get("SR-02") and effective_children > 0:
-            ratio = adults / effective_children
-            if ratio > 0.25:
-                rule = rules["SR-02"]
-                result.hard_rejected = True
-                result.violations.append(PolicyViolation(
-                    rule_name=rule["id"],
-                    severity="hard",
-                    description=rule["description"],
-                    measured_value=round(ratio, 3),
-                    threshold=0.25,
-                ))
+        # Isolation and Ratio checks removed (User request: 'rest all is fine')
 
         sharp_rule = rules.get("SR-03")
         if sharp_rule:

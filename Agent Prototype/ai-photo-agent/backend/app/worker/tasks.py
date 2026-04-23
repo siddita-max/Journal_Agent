@@ -26,7 +26,7 @@ from app.models.models import (
 from app.services.drive_service import GoogleDriveService
 from app.services.preprocessing import PreprocessingPipeline
 from app.services.inference_engine import InferenceEngine
-from app.services.scoring_engine import ScoringEngine, Decision
+from app.services.scoring_engine import ScoringEngine, Decision, ScoreResult
 from app.services.storage_service import StorageService
 from app.services.policy_engine import PolicyEngine, get_school_child_safety_policy
 
@@ -152,6 +152,31 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
             # ── Step 1: Download ──────────────────────────────────
             image_bytes = drive_svc.download_image(file_id)
 
+            # ── Step 1b: Date Validation ──────────────────────────
+            if file_meta.get("is_wrong_date"):
+                actual_date = file_meta.get("actual_date", "Unknown")
+                score_result = ScoreResult(
+                    final_score=0.0,
+                    decision=Decision.REJECTED,
+                    reasons=[f"Date Mismatch: This photo is from {actual_date}, but this job is for today."],
+                    hard_rejected=True
+                )
+                # Skip inference/scoring and go to storage
+                record.decision = ImageDecision.REJECTED
+                record.rejection_reasons = score_result.reasons
+                record.processed_at = datetime.now(timezone.utc)
+                record.image_data = image_bytes
+                
+                storage_path = storage.upload_image(
+                    image_bytes, f"{job_id}/{filename}", "rejected",
+                    content_type=file_meta.get("mime_type", "image/jpeg")
+                )
+                record.storage_url = storage_path
+                
+                _increment_job_counters_and_finalize(db, uuid.UUID(job_id), "rejected", datetime.now(timezone.utc))
+                db.commit()
+                return
+
             # ── Step 2: Preprocess ────────────────────────────────
             img_cv, prep_result = preproc.evaluate(image_bytes, filename)
             record.width = prep_result.width
@@ -168,6 +193,7 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
                 record.student_count = inf_result.yolo.student_count
                 record.teacher_count = inf_result.yolo.teacher_count
                 record.detected_activity = inf_result.clip.detected_activity
+                record.activity_description = inf_result.qwen.activity_description if inf_result.qwen else None
                 record.phone_detected = inf_result.yolo.phone_detected
                 record.detected_objects = inf_result.yolo.detections
                 record.nsfw_detected = inf_result.safety.nsfw_detected

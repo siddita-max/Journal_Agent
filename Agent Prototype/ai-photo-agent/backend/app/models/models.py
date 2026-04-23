@@ -131,6 +131,7 @@ class ImageRecord(Base):
     student_count = Column(Integer, nullable=True)
     teacher_count = Column(Integer, nullable=True)
     detected_activity = Column(String(256), nullable=True)
+    activity_description = Column(Text, nullable=True)  # 🤖 NEW: Natural language description from Qwen
     phone_detected = Column(Boolean, nullable=True)
     detected_objects = Column(JSON, nullable=True)  # list of {class, confidence}
 
