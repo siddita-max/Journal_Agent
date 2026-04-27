@@ -187,15 +187,17 @@
                 />
               </div>
               <div class="flex flex-col gap-2">
-                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest" for="driveUrl"
-                  >Drive Folder URL</label
-                >
+                <div class="flex items-center justify-between">
+                  <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest" for="driveUrl">Drive Folder URL</label>
+                  <button id="btnReloadJob" class="text-[9px] font-bold text-teal-600 hover:text-teal-800 underline hidden" type="button">↺ Reload Job</button>
+                </div>
                 <input
                   id="driveUrl"
                   class="w-full bg-slate-50/50 border border-slate-100 focus:bg-white focus:ring-4 focus:ring-teal-500/5 focus:border-teal-500 transition-all rounded-xl font-body-md text-sm py-3 px-4 outline-none"
                   placeholder="https://drive.google.com/..."
                   type="text"
                 />
+                <input id="reloadJobId" type="text" placeholder="Paste Job ID to resume tracking..." class="w-full bg-slate-50/50 border border-amber-200 focus:ring-4 focus:ring-amber-500/5 focus:border-amber-500 transition-all rounded-xl font-body-md text-sm py-2 px-4 outline-none text-[11px] hidden" />
               </div>
             </div>
 
@@ -271,6 +273,15 @@
               <div id="fileList" class="space-y-3"></div>
             </div>
             <div id="jobProgressSection" class="hidden mt-4 pt-4 border-t border-teal-50">
+              <!-- Active journal-title filter badge -->
+              <div id="jobTitleBadge" class="hidden mb-3 flex items-center gap-2 bg-teal-50 border border-teal-200 rounded-xl px-3 py-2">
+                <span class="material-symbols-outlined text-teal-600 text-sm">filter_alt</span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-[9px] uppercase font-bold text-teal-500 tracking-widest">Filtering by Journal Title</p>
+                  <p id="jobTitleText" class="text-[11px] font-semibold text-teal-800 truncate"></p>
+                </div>
+                <span class="text-[9px] font-bold text-teal-600 bg-teal-100 px-2 py-0.5 rounded-full whitespace-nowrap">Groq AI</span>
+              </div>
               <div class="flex items-center justify-between mb-2">
                 <p class="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Job Progress</p>
                 <p id="jobProgressLabel" class="text-[11px] font-bold text-teal-700">0 / 0</p>
@@ -279,14 +290,10 @@
                 <div id="jobProgressBar" class="h-full bg-teal-500 transition-all duration-300" style="width: 0%"></div>
               </div>
               <p id="jobStatusText" class="text-[10px] text-slate-500 mt-2">Waiting to start...</p>
-              <div class="grid grid-cols-3 gap-2 mt-3">
+              <div class="grid grid-cols-2 gap-2 mt-3">
                 <div class="bg-teal-50 border border-teal-100 rounded p-2">
                   <p class="text-[9px] uppercase font-semibold text-teal-700">Selected</p>
                   <p id="approvedCountLive" class="text-sm font-bold text-teal-800">0</p>
-                </div>
-                <div class="bg-amber-50 border border-amber-100 rounded p-2">
-                  <p class="text-[9px] uppercase font-semibold text-amber-700">Review</p>
-                  <p id="reviewCountLive" class="text-sm font-bold text-amber-800">0</p>
                 </div>
                 <div class="bg-red-50 border border-red-100 rounded p-2">
                   <p class="text-[9px] uppercase font-semibold text-red-700">Rejected</p>
@@ -327,14 +334,10 @@
               <h3 class="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Live AI Decisions</h3>
               <span class="flex h-2 w-2 rounded-full bg-teal-500 animate-pulse"></span>
             </div>
-            <div class="grid grid-cols-3 gap-4 overflow-hidden h-full">
+            <div class="grid grid-cols-2 gap-4 overflow-hidden h-full">
               <div class="flex flex-col min-w-0 bg-teal-50/30 rounded-xl p-2 border border-teal-100/30">
                 <p class="text-[9px] font-black text-teal-700 uppercase mb-2 px-1">Selected</p>
                 <div id="approvedList" class="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1"></div>
-              </div>
-              <div class="flex flex-col min-w-0 bg-amber-50/30 rounded-xl p-2 border border-amber-100/30">
-                <p class="text-[9px] font-black text-amber-700 uppercase mb-2 px-1">Review</p>
-                <div id="reviewList" class="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1"></div>
               </div>
               <div class="flex flex-col min-w-0 bg-red-50/30 rounded-xl p-2 border border-red-100/30">
                 <p class="text-[9px] font-black text-red-700 uppercase mb-2 px-1">Rejected</p>
@@ -397,13 +400,13 @@
             
             <div class="flex-1 space-y-6 overflow-y-auto custom-scrollbar pr-2">
               <div>
-                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">AI Analysis Reason</p>
+                <p id="modalReasonLabel" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">AI Analysis Reason</p>
                 <p id="modalReason" class="text-sm text-slate-600 dark:text-slate-300 mt-2 leading-relaxed italic border-l-2 border-teal-500 pl-4 py-1">
                   "This image features a clear subject with good lighting and composition."
                 </p>
               </div>
               
-              <div class="grid grid-cols-2 gap-4">
+              <div id="modalDetailsGrid" class="grid grid-cols-2 gap-4">
                 <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
                   <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Detected Role</p>
                   <p id="modalRole" class="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-1">Student</p>
@@ -412,10 +415,18 @@
                   <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Face Count</p>
                   <p id="modalFaceCount" class="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-1">1</p>
                 </div>
-                <div class="col-span-2 p-3 rounded-xl bg-teal-50/50 dark:bg-teal-900/20 border border-teal-100/50 dark:border-teal-800/50">
-                  <p class="text-[9px] font-bold text-teal-600 dark:text-teal-400 uppercase tracking-widest">AI Scene Analysis</p>
+                <div id="modalActivityWrap" class="col-span-2 p-3 rounded-xl bg-teal-50/50 dark:bg-teal-900/20 border border-teal-100/50 dark:border-teal-800/50">
+                  <p class="text-[9px] font-bold text-teal-600 dark:text-teal-400 uppercase tracking-widest">Activity (Groq Vision)</p>
                   <p id="modalActivity" class="text-sm font-bold text-slate-700 dark:text-slate-200 mt-1 capitalize">Classroom Learning</p>
                   <p id="modalActivityDesc" class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">Students focused at desks with books.</p>
+                </div>
+                <div id="modalSurroundingsWrap" class="col-span-2 p-3 rounded-xl bg-indigo-50/50 dark:bg-indigo-900/20 border border-indigo-100/50 dark:border-indigo-800/50">
+                  <p class="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Surroundings (Groq Vision)</p>
+                  <p id="modalSurroundings" class="text-[11px] text-slate-600 dark:text-slate-300 mt-1 leading-snug">Room and environment description not available.</p>
+                </div>
+                <div id="modalJournalMatchWrap" class="col-span-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 hidden">
+                  <p class="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Journal Title Match</p>
+                  <p id="modalJournalMatch" class="text-[11px] text-slate-600 dark:text-slate-300 mt-1 leading-snug">—</p>
                 </div>
               </div>
             </div>
@@ -458,10 +469,10 @@
           jobProgressBar: document.getElementById("jobProgressBar"),
           jobStatusText: document.getElementById("jobStatusText"),
           approvedCountLive: document.getElementById("approvedCountLive"),
-          reviewCountLive: document.getElementById("reviewCountLive"),
           rejectedCountLive: document.getElementById("rejectedCountLive"),
+          jobTitleBadge: document.getElementById("jobTitleBadge"),
+          jobTitleText: document.getElementById("jobTitleText"),
           approvedList: document.getElementById("approvedList"),
-          reviewList: document.getElementById("reviewList"),
           rejectedList: document.getElementById("rejectedList"),
           activityList: document.getElementById("activityList"),
           lastUpdated: document.getElementById("lastUpdated"),
@@ -471,6 +482,8 @@
           btnSubmit: document.getElementById("btnSubmit"),
           btnClear: document.getElementById("btnClear"),
           btnRefresh: document.getElementById("btnRefresh"),
+          btnReloadJob: document.getElementById("btnReloadJob"),
+          reloadJobId: document.getElementById("reloadJobId"),
           cardSuccess: document.getElementById("cardSuccess"),
           cardWarn: document.getElementById("cardWarn"),
           cardError: document.getElementById("cardError"),
@@ -490,6 +503,13 @@
           modalFaceCount: document.getElementById("modalFaceCount"),
           modalActivity: document.getElementById("modalActivity"),
           modalActivityDesc: document.getElementById("modalActivityDesc"),
+          modalSurroundings: document.getElementById("modalSurroundings"),
+          modalDetailsGrid: document.getElementById("modalDetailsGrid"),
+          modalReasonLabel: document.getElementById("modalReasonLabel"),
+          modalActivityWrap: document.getElementById("modalActivityWrap"),
+          modalSurroundingsWrap: document.getElementById("modalSurroundingsWrap"),
+          modalJournalMatch: document.getElementById("modalJournalMatch"),
+          modalJournalMatchWrap: document.getElementById("modalJournalMatchWrap"),
           modalBtnApprove: document.getElementById("modalBtnApprove"),
           modalBtnReject: document.getElementById("modalBtnReject"),
           modalBtnNext: document.getElementById("modalBtnNext"),
@@ -693,34 +713,34 @@
             const name = document.createElement("p");
             name.className = "text-[10px] font-semibold text-slate-700 truncate";
             name.textContent = img.filename || "unknown";
-            const meta = document.createElement("p");
-            meta.className = "text-[10px] text-slate-400";
-            const score = Number.isFinite(Number(img.final_score)) ? Number(img.final_score).toFixed(3) : "-";
-            meta.textContent = `Score ${score}`;
-            if (tone === "rejected" && img.rejection_reasons && img.rejection_reasons.length > 0) {
+
+            left.appendChild(name);
+            if (tone === "rejected") {
+              // Rejected: filename + reason only — no score, no chip
               const reason = document.createElement("p");
               reason.className = "text-[9px] font-medium text-red-500 mt-0.5 line-clamp-2 leading-tight";
-              reason.textContent = img.rejection_reasons[0];
+              reason.textContent = (img.rejection_reasons && img.rejection_reasons.length > 0)
+                ? img.rejection_reasons[0]
+                : "Rejected";
               left.appendChild(reason);
+              top.appendChild(left);
             } else {
+              // Approved: filename + score + activity + chip
+              const score = Number.isFinite(Number(img.final_score)) ? Number(img.final_score).toFixed(3) : "-";
+              const meta = document.createElement("p");
+              meta.className = "text-[10px] text-slate-400";
+              meta.textContent = `Score ${score}`;
+              left.appendChild(meta);
               const activity = document.createElement("p");
               activity.className = "text-[9px] font-bold text-teal-600/80 mt-0.5 truncate capitalize";
               activity.textContent = img.detected_activity || "No activity detected";
               left.appendChild(activity);
+              const chip = document.createElement("span");
+              chip.className = "text-[8px] px-1.5 py-0.5 rounded-full font-bold whitespace-nowrap bg-teal-50 text-teal-700";
+              chip.textContent = (img.effective_decision || "approved").toUpperCase();
+              top.appendChild(left);
+              top.appendChild(chip);
             }
-
-            const chip = document.createElement("span");
-            chip.className =
-              "text-[8px] px-1.5 py-0.5 rounded-full font-bold whitespace-nowrap " +
-              (tone === "approved"
-                ? "bg-teal-50 text-teal-700"
-                : tone === "review"
-                  ? "bg-amber-50 text-amber-700"
-                  : "bg-red-50 text-red-700");
-            chip.textContent = (img.effective_decision || tone || "pending").toUpperCase();
-
-            top.appendChild(left);
-            top.appendChild(chip);
             body.appendChild(top);
 
             row.appendChild(thumbContainer);
@@ -754,14 +774,59 @@
           const decision = (img.effective_decision || tone || "pending").toLowerCase();
           els.modalDecisionChip.textContent = decision.toUpperCase();
           els.modalDecisionChip.className = "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider " +
-            (decision === "approved" ? "bg-teal-100 text-teal-700" : 
-             decision === "review" ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-700");
-          
-          els.modalReason.textContent = img.ai_reason || "No analysis details provided by the AI.";
-          els.modalRole.textContent = img.role_classification || "Unknown";
+            (decision === "approved" ? "bg-teal-100 text-teal-700" : "bg-red-100 text-red-700");
+
+          const rejectionText = img.ai_reason
+            || (img.rejection_reasons && img.rejection_reasons.length > 0 ? img.rejection_reasons.join("; ") : null)
+            || "No details available.";
+          els.modalReason.textContent = rejectionText;
+          els.modalRole.textContent = img.role_classification || (img.groq && img.groq.role_summary) || "Unknown";
           els.modalFaceCount.textContent = img.face_count !== undefined ? img.face_count : "-";
-          els.modalActivity.textContent = img.detected_activity || "General School Scene";
-          els.modalActivityDesc.textContent = img.activity_description || "No detailed scene description available.";
+
+          // For rejected images show only the reason — hide all detail panels.
+          const isRejected = decision === "rejected";
+          els.modalReasonLabel.textContent = isRejected ? "Rejection Reason" : "AI Analysis Reason";
+          els.modalReason.className = isRejected
+            ? "text-sm text-red-600 dark:text-red-400 mt-2 leading-relaxed italic border-l-2 border-red-400 pl-4 py-1"
+            : "text-sm text-slate-600 dark:text-slate-300 mt-2 leading-relaxed italic border-l-2 border-teal-500 pl-4 py-1";
+          els.modalDetailsGrid.style.display = isRejected ? "none" : "";
+          els.modalActivityWrap.style.display = isRejected ? "none" : "";
+          els.modalSurroundingsWrap.style.display = isRejected ? "none" : "";
+
+          // Prefer Groq-derived activity_detail; fall back to detected_activity label.
+          const activityHeadline = img.activity_detail || img.detected_activity || "General School Scene";
+          els.modalActivity.textContent = activityHeadline;
+
+          // For activity description, prefer the explicit "Activity:" line from Groq;
+          // if the description doesn't contain a structured prefix, show it as-is.
+          const desc = img.activity_description || "";
+          let activityBody = desc;
+          if (desc.toLowerCase().includes("activity:") && desc.toLowerCase().includes("surroundings:")) {
+            // Pull out everything between "Activity:" and "Surroundings:"
+            const m = desc.match(/Activity:\s*([\s\S]*?)\n\s*Surroundings:/i);
+            activityBody = (m && m[1] || "").trim() || activityHeadline;
+          }
+          els.modalActivityDesc.textContent = activityBody || "No detailed scene description available.";
+
+          // Surroundings panel: prefer the parsed `surroundings` field; otherwise extract
+          // from activity_description; otherwise fall back to a default placeholder.
+          let surroundingsText = img.surroundings || "";
+          if (!surroundingsText && desc.toLowerCase().includes("surroundings:")) {
+            const m2 = desc.match(/Surroundings:\s*([\s\S]*)$/i);
+            surroundingsText = (m2 && m2[1] || "").trim();
+          }
+          els.modalSurroundings.textContent = surroundingsText || "Room and environment description not available.";
+
+          // Optional journal-title match summary surfaced in rejection_reasons.
+          const reasonsList = Array.isArray(img.rejection_reasons) ? img.rejection_reasons : [];
+          const offTopic = reasonsList.find((r) => /off-topic|journal/i.test(String(r)));
+          if (offTopic) {
+            els.modalJournalMatchWrap.classList.remove("hidden");
+            els.modalJournalMatch.textContent = offTopic;
+          } else {
+            els.modalJournalMatchWrap.classList.add("hidden");
+            els.modalJournalMatch.textContent = "—";
+          }
           
           // Update Next button visibility and label
           const hasNext = laneImages.length > 0 && laneIndex < laneImages.length - 1;
@@ -833,14 +898,14 @@
 
         function resetLiveJobPanels() {
           els.jobProgressSection.classList.add("hidden");
+          els.jobTitleBadge.classList.add("hidden");
+          els.jobTitleText.textContent = "";
           els.jobProgressLabel.textContent = "0 / 0";
           els.jobProgressBar.style.width = "0%";
           els.jobStatusText.textContent = "Waiting to start...";
           els.approvedCountLive.textContent = "0";
-          els.reviewCountLive.textContent = "0";
           els.rejectedCountLive.textContent = "0";
           renderDecisionCards(els.approvedList, [], "approved");
-          renderDecisionCards(els.reviewList, [], "review");
           renderDecisionCards(els.rejectedList, [], "rejected");
         }
 
@@ -853,6 +918,15 @@
           els.jobProgressLabel.textContent = `${processed} / ${total}`;
           els.jobProgressBar.style.width = `${pct}%`;
           els.jobStatusText.textContent = `Status: ${(job && job.status ? job.status : "pending").toUpperCase()} • ${pct}%`;
+
+          // Show/update the journal-title filter badge.
+          const title = job && job.journal_title ? String(job.journal_title).trim() : "";
+          if (title) {
+            els.jobTitleBadge.classList.remove("hidden");
+            els.jobTitleText.textContent = title;
+          } else {
+            els.jobTitleBadge.classList.add("hidden");
+          }
         }
 
         async function parseApiError(resp) {
@@ -925,42 +999,81 @@
 
         async function refreshReviewLanes(jobId) {
           if (!jobId) return;
-          const [approved, review, rejected, stats] = await Promise.all([
+          // Treat any historical "review" verdicts as rejected so legacy data still surfaces.
+          const [approved, rejected, reviewLegacy, stats] = await Promise.all([
             loadJobImages(jobId, "approved"),
-            loadJobImages(jobId, "review"),
             loadJobImages(jobId, "rejected"),
+            loadJobImages(jobId, "review"),
             loadJobStats(jobId),
           ]);
+          const rejectedAll = [...rejected, ...reviewLegacy];
           renderDecisionCards(els.approvedList, approved, "approved", jobId);
-          renderDecisionCards(els.reviewList, review, "review", jobId);
-          renderDecisionCards(els.rejectedList, rejected, "rejected", jobId);
-          
-          const d = (stats && stats.decisions) ? stats.decisions : {};
-          els.approvedCountLive.textContent = String(d.approved ? d.approved.count : approved.length);
-          els.reviewCountLive.textContent = String(d.review ? d.review.count : review.length);
-          els.rejectedCountLive.textContent = String(d.rejected ? d.rejected.count : rejected.length);
+          renderDecisionCards(els.rejectedList, rejectedAll, "rejected", jobId);
 
-          // 🤖 NEW: Live activity stream logging
-          const allImages = [...approved, ...review, ...rejected];
+          const d = (stats && stats.decisions) ? stats.decisions : {};
+          const rejectedCount = (d.rejected ? d.rejected.count : 0) + (d.review ? d.review.count : 0);
+          els.approvedCountLive.textContent = String(d.approved ? d.approved.count : approved.length);
+          els.rejectedCountLive.textContent = String(rejectedCount || rejectedAll.length);
+
+          // Live activity stream — surface Groq's rich activity description when available.
+          const allImages = [...approved, ...rejectedAll];
           for (const img of allImages) {
             if (!state.seenImageIds.has(img.id)) {
               state.seenImageIds.add(img.id);
-              if (img.detected_activity && img.detected_activity !== "Unknown") {
-                const decision = (img.decision || "").toLowerCase();
-                const color = decision === "approved" ? "bg-teal-400" : decision === "review" ? "bg-amber-400" : "bg-red-400";
-                addActivity(`AI detected "${img.detected_activity}" in ${img.filename}`, "SUCCESS", color);
+              const decision = (img.decision || "").toLowerCase();
+              const color = decision === "approved" ? "bg-teal-400" : "bg-red-400";
+              const detail = img.activity_detail || img.detected_activity;
+              if (detail && detail !== "Unknown") {
+                const surroundings = img.surroundings ? ` (${img.surroundings.slice(0, 80)}${img.surroundings.length > 80 ? "…" : ""})` : "";
+                addActivity(`Groq: "${detail}"${surroundings} — ${img.filename}`, "SUCCESS", color);
               }
             }
           }
         }
 
         async function pollJob(jobId) {
+          const TOTAL_TIMEOUT_MS  = 60 * 60 * 1000; // 60 minutes max (covers 200+ photos at ~12s each)
+          const STALL_TIMEOUT_MS  =  5 * 60 * 1000; // warn after 5 min no progress
+          const PENDING_WARN_MS   = 60 * 1000;       // warn after 60 s still pending
           const start = Date.now();
           state.lastLiveRefreshMs = 0;
-          while (Date.now() - start < 5 * 60 * 1000) {
+          let lastProcessed = -1;
+          let lastProgressAt = Date.now();
+          let pendingWarned = false;
+          let stallWarned = false;
+
+          while (Date.now() - start < TOTAL_TIMEOUT_MS) {
             const job = await apiGet(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
             state.driveJob = job;
             updateProgressUI(job);
+
+            // Detect worker not running: still pending after 45 s
+            if (!pendingWarned && job.status === "pending" && Date.now() - start > PENDING_WARN_MS) {
+              pendingWarned = true;
+              showCard(
+                "warn",
+                "Worker may not be running",
+                "The job has been queued for over 45 s without starting. " +
+                "Make sure the Celery worker is running: docker compose up worker"
+              );
+            }
+
+            // Detect stall: processing but no new images for 3 min
+            if (job.processed_images > lastProcessed) {
+              lastProcessed = job.processed_images;
+              lastProgressAt = Date.now();
+              stallWarned = false;
+            }
+            if (!stallWarned && job.status === "processing" && Date.now() - lastProgressAt > STALL_TIMEOUT_MS) {
+              stallWarned = true;
+              showCard(
+                "warn",
+                "Processing appears stalled",
+                `No new images processed in the last 3 min ` +
+                `(${job.processed_images}/${job.total_images} done). ` +
+                `Check worker logs — a Groq API timeout may be blocking a task.`
+              );
+            }
 
             const now = Date.now();
             if (now - state.lastLiveRefreshMs > 2500) {
@@ -975,7 +1088,10 @@
             if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return job;
             await new Promise((r) => setTimeout(r, 1500));
           }
-          throw new Error("Job polling timeout.");
+          throw new Error(
+            "Job is taking longer than 60 minutes. It will continue running in the background — " +
+            "use the Reload Job field to resume tracking."
+          );
         }
 
         async function loadJobStats(jobId) {
@@ -1010,22 +1126,21 @@
           for (const img of images) {
             const decision = (img.decision || "pending").toLowerCase();
             const ok = decision === "approved";
-            const isReview = decision === "review";
             const row = document.createElement("div");
             row.className =
               "flex items-center justify-between p-2 rounded-lg " +
-              (ok ? "bg-slate-50 border border-slate-100" : isReview ? "bg-amber-50/60 border border-amber-100" : "bg-red-50/50 border border-red-100");
+              (ok ? "bg-slate-50 border border-slate-100" : "bg-red-50/50 border border-red-100");
 
             const left = document.createElement("div");
             left.className = "flex items-center gap-3 overflow-hidden";
             const icon = document.createElement("span");
             icon.className =
-              "material-symbols-outlined text-lg " + (ok ? "text-teal-500" : isReview ? "text-amber-600" : "text-red-500");
+              "material-symbols-outlined text-lg " + (ok ? "text-teal-500" : "text-red-500");
             icon.textContent = "image";
             const meta = document.createElement("div");
             meta.className = "truncate";
             const name = document.createElement("p");
-            name.className = "text-xs font-medium truncate " + (ok ? "text-slate-700" : isReview ? "text-amber-800" : "text-red-700");
+            name.className = "text-xs font-medium truncate " + (ok ? "text-slate-700" : "text-red-700");
             name.textContent = img.filename || "unknown";
             const sub = document.createElement("p");
             sub.className = "text-[10px] text-slate-400";
@@ -1038,7 +1153,7 @@
             const chip = document.createElement("span");
             chip.className =
               "text-[10px] px-2 py-0.5 rounded-full font-bold " +
-              (ok ? "bg-teal-100 text-teal-700" : isReview ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-700");
+              (ok ? "bg-teal-100 text-teal-700" : "bg-red-100 text-red-700");
             chip.textContent = decision.toUpperCase();
             row.appendChild(left);
             row.appendChild(chip);
@@ -1085,14 +1200,38 @@
           }
         }
 
+        function validateDriveUrl(raw) {
+          const v = raw.trim();
+          if (!v) return null;
+          if (!v.startsWith("http")) {
+            return "Drive URL must start with https://drive.google.com/…";
+          }
+          if (!v.includes("drive.google.com")) {
+            return "That doesn't look like a Google Drive URL. It should contain drive.google.com";
+          }
+          if (!/folders\//.test(v) && !/id=/.test(v)) {
+            return "URL must be a Drive folder link, e.g. https://drive.google.com/drive/folders/…";
+          }
+          return null;   // valid
+        }
+
         async function submit() {
           if (state.busy) return;
           const title = (els.journalTitle.value || "").trim();
           const driveUrl = (els.driveUrl.value || "").trim();
 
           if (!driveUrl && !state.files.length) {
-            showCard("error", "Selection required", "Select local photos or provide a Drive URL.");
+            showCard("error", "Selection required", "Select local photos or provide a Drive folder URL.");
             return;
+          }
+
+          if (driveUrl) {
+            const urlErr = validateDriveUrl(driveUrl);
+            if (urlErr) {
+              showCard("error", "Invalid Drive URL", urlErr);
+              els.driveUrl.focus();
+              return;
+            }
           }
 
           setBusy(true);
@@ -1100,21 +1239,49 @@
             if (driveUrl) {
               resetLiveJobPanels();
               showCard("warn", "Submitting", "Drive folder validation and job creation...");
-              const job = await apiPostJson("/api/v1/jobs/", { drive_folder_url: driveUrl });
-              addActivity(`Drive job created (${job.id})`, "SUCCESS", "bg-teal-500");
-              showCard("warn", "Processing", "Drive job running...");
-              const finalJob = await pollJob(job.id);
+              const jobPayload = { drive_folder_url: driveUrl };
+              if (title) jobPayload.journal_title = title;
+              const job = await apiPostJson("/api/v1/jobs/", jobPayload);
+              addActivity(
+                title
+                  ? `Drive job created for "${title}" (${job.id})`
+                  : `Drive job created (${job.id})`,
+                "SUCCESS",
+                "bg-teal-500",
+              );
+              const estSecs = job.total_images > 0 ? job.total_images * 12 : null;
+              const estMsg = estSecs ? ` (~${Math.ceil(estSecs / 60)} min for ${job.total_images} photos)` : "";
+              showCard("warn", "Processing", `Drive job running${estMsg}. Photos appear below as they complete.`);
+              let finalJob;
+              try {
+                finalJob = await pollJob(job.id);
+              } catch (pollErr) {
+                // Timeout — job is still running in background, show resume option
+                showCard("warn", "Still processing — running in background",
+                  `Large folder takes time. Results appear below as photos complete. Job ID: ${job.id}`
+                );
+                addActivity(`Job running in background (${job.id})`, "WARN", "bg-yellow-400");
+                els.reloadJobId.value = job.id;
+                els.reloadJobId.classList.remove("hidden");
+                els.btnReloadJob.classList.remove("hidden");
+                setBusy(false);
+                await refreshSystem();
+                return;
+              }
               if (finalJob.status === "completed") {
                 // Prefer stats endpoint (source of truth for UI counts).
+                const finishedTitle = finalJob.journal_title ? `"${finalJob.journal_title}" — ` : "";
                 try {
                   const stats = await loadJobStats(finalJob.id);
                   const d = (stats && stats.decisions) ? stats.decisions : {};
                   const approved = d.approved ? d.approved.count : finalJob.approved_count;
-                  const review = d.review ? d.review.count : finalJob.review_count;
-                  const rejected = d.rejected ? d.rejected.count : finalJob.rejected_count;
-                  showCard("success", "Completed", `Approved: ${approved} • Review: ${review} • Rejected: ${rejected}`);
+                  const rejected =
+                    (d.rejected ? d.rejected.count : (finalJob.rejected_count || 0)) +
+                    (d.review ? d.review.count : (finalJob.review_count || 0));
+                  showCard("success", "Completed", `${finishedTitle}Approved: ${approved} • Rejected: ${rejected}`);
                 } catch (_) {
-                  showCard("success", "Completed", `Approved: ${finalJob.approved_count} • Review: ${finalJob.review_count} • Rejected: ${finalJob.rejected_count}`);
+                  const rej = (finalJob.rejected_count || 0) + (finalJob.review_count || 0);
+                  showCard("success", "Completed", `${finishedTitle}Approved: ${finalJob.approved_count} • Rejected: ${rej}`);
                 }
                 addActivity(`Drive job completed (${finalJob.id})`, "SUCCESS", "bg-teal-500");
                 try {
@@ -1164,7 +1331,7 @@
             const batch = await uploadBatch(state.files, title || undefined);
             const summary = batch && batch.summary ? batch.summary : null;
             if (summary) {
-              showCard("success", "Submitted", `Approved: ${summary.approved} • Review: ${summary.review} • Rejected: ${summary.rejected}`);
+              showCard("success", "Submitted", `Approved: ${summary.approved} • Rejected: ${summary.rejected}`);
             } else {
               showCard("success", "Submitted", "Batch upload complete.");
             }
@@ -1206,6 +1373,33 @@
         els.btnSubmit.addEventListener("click", submit);
         els.btnClear.addEventListener("click", clearAll);
         els.btnRefresh.addEventListener("click", refreshSystem);
+
+        // Reload a background job by ID
+        els.btnReloadJob.addEventListener("click", async () => {
+          const jobId = (els.reloadJobId.value || "").trim();
+          if (!jobId) { showCard("error", "No Job ID", "Paste a Job ID first."); return; }
+          setBusy(true);
+          showCard("warn", "Resuming", `Reconnecting to job ${jobId}…`);
+          try {
+            const finalJob = await pollJob(jobId);
+            if (finalJob.status === "completed") {
+              const finishedTitle = finalJob.journal_title ? `"${finalJob.journal_title}" — ` : "";
+              const stats = await loadJobStats(finalJob.id).catch(() => null);
+              const d = stats && stats.decisions ? stats.decisions : {};
+              const approved = d.approved ? d.approved.count : finalJob.approved_count;
+              const rejected = (d.rejected ? d.rejected.count : (finalJob.rejected_count || 0)) +
+                               (d.review ? d.review.count : (finalJob.review_count || 0));
+              showCard("success", "Completed", `${finishedTitle}Approved: ${approved} • Rejected: ${rejected}`);
+              await refreshReviewLanes(finalJob.id).catch(() => {});
+            } else {
+              showCard("warn", "Still running", `Status: ${finalJob.status} — try again in a few minutes.`);
+            }
+          } catch (e) {
+            showCard("warn", "Still running", `Job ${jobId} is still processing — try again in a few minutes.`);
+          } finally {
+            setBusy(false);
+          }
+        });
 
         els.btnCloseModal.addEventListener("click", closeImageModal);
         els.imageModal.addEventListener("click", (e) => {

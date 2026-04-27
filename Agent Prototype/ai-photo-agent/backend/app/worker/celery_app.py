@@ -28,7 +28,9 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,           # Fair task distribution
     broker_connection_retry_on_startup=True,  # Suppress Celery 6.0 deprecation
     task_routes={
-        "app.worker.tasks.process_photo_job": {"queue": "photo_processing"},
+        # Orchestration task gets its own queue checked FIRST so a new job
+        # is never blocked behind a backlog of per-image tasks.
+        "app.worker.tasks.process_photo_job": {"queue": "job_orchestration"},
         "app.worker.tasks.process_single_image": {"queue": "photo_processing"},
     },
     beat_schedule={

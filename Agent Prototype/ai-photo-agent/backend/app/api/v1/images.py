@@ -368,19 +368,44 @@ def _to_summary(img: ImageRecord) -> dict:
         role_classification = f"Students ({img.student_count})"
     elif img.teacher_count:
         role_classification = f"Teachers ({img.teacher_count})"
-    
+
+    # Split the Groq narrative ("Role: ...\nActivity: ...\nSurroundings: ...") into parts
+    # so the frontend can surface them in dedicated fields. Falls back to None
+    # when the description came from another source (Qwen) or is empty.
+    activity_detail = None
+    surroundings = None
+    groq_role_summary = None
+    desc = (img.activity_description or "").strip()
+    if desc:
+        for line in desc.splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith("role:"):
+                groq_role_summary = stripped.split(":", 1)[1].strip() or None
+            elif stripped.lower().startswith("activity:"):
+                activity_detail = stripped.split(":", 1)[1].strip() or None
+            elif stripped.lower().startswith("surroundings:"):
+                surroundings = stripped.split(":", 1)[1].strip() or None
+
+    # When YOLO found no students/teachers, use Groq's role summary as the
+    # displayed role (e.g. "1 parent, 1 child, 1 teacher").
+    if role_classification == "Unknown" and groq_role_summary:
+        role_classification = groq_role_summary
+
+    effective = img.human_override.value if img.human_override else (img.decision.value if img.decision else None)
+    is_approved = effective == "approved"
+
     return {
         "id": str(img.id),
         "job_id": str(img.job_id),
         "filename": img.filename,
         "decision": img.decision.value if img.decision else None,
-        "effective_decision": (img.human_override.value if img.human_override else img.decision.value if img.decision else None),
+        "effective_decision": effective,
         "final_score": img.final_score,
         "rejection_reasons": img.rejection_reasons or [],
         "width": img.width,
         "height": img.height,
         "people_count": img.people_count,
-        "face_count": img.people_count,  # Alias for frontend
+        "face_count": img.people_count,
         "phone_detected": img.phone_detected,
         "nsfw_detected": img.nsfw_detected or False,
         "storage_url": img.storage_url,
@@ -388,11 +413,13 @@ def _to_summary(img: ImageRecord) -> dict:
         "db_image_url": f"/api/v1/images/{img.id}/data" if img.image_data else None,
         "human_override": img.human_override.value if img.human_override else None,
         "processed_at": img.processed_at,
-        "ai_reason": ai_reason,  # 🤖 NEW: Computed from reasons
-        "role_classification": role_classification,  # 🤖 NEW: Computed from student/teacher counts
-        "detected_activity": img.detected_activity or "Unknown",  # 🤖 NEW: Main activity detected
-        "activity_description": img.activity_description,        # 🤖 NEW: Description from Qwen
-        "student_count": img.student_count,  # 🤖 NEW: Raw counts for reference
+        "ai_reason": ai_reason,
+        "role_classification": role_classification,
+        "detected_activity": (img.detected_activity or "Unknown") if is_approved else None,
+        "activity_description": img.activity_description if is_approved else None,
+        "activity_detail": activity_detail if is_approved else None,
+        "surroundings": surroundings if is_approved else None,
+        "student_count": img.student_count,
         "teacher_count": img.teacher_count,
     }
 

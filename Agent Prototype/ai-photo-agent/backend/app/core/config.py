@@ -67,11 +67,23 @@ class Settings(BaseSettings):
     CLIP_MODEL_NAME: str = "ViT-L/14@336px"
     YOLO_MODEL_PATH: str = "yolov8s.pt"
     YOLO_AUGMENT: bool = False
-    QWEN_ENABLED: bool = True
+    QWEN_ENABLED: bool = False
     QWEN_MODEL_NAME: str = "Qwen/Qwen2-VL-2B-Instruct"  # 2B model fits in 4GB VRAM (RTX 3050)
     QWEN_DEVICE: str = "auto"  # auto | cpu | cuda
     QWEN_CACHE_ENABLED: bool = True
     DEVICE: str = "auto"  # auto | cpu | cuda
+
+    # ── Groq Vision API (primary multimodal analyser) ────────────────
+    # When GROQ_ENABLED=true and GROQ_API_KEY is provided, the inference
+    # pipeline calls Groq's chat-completions vision endpoint for activity
+    # detection, surroundings description, and journal-title matching.
+    GROQ_ENABLED: bool = True
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    GROQ_TIMEOUT_S: float = 45.0
+    GROQ_MAX_TOKENS: int = 700
+    GROQ_CACHE_ENABLED: bool = True
+    GROQ_MATCH_REQUIRED: bool = True  # Hard-reject photos that don't match the journal title
 
     # ── Scoring Thresholds ───────────────────────────────────────────
     SCORE_APPROVED_THRESHOLD: float = 0.75

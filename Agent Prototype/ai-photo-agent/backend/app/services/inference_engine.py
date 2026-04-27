@@ -19,6 +19,7 @@ from ultralytics import YOLO
 import structlog
 
 from app.core.config import settings
+from app.services.groq_vision_service import GroqVisionResult, GroqVisionService
 
 log = structlog.get_logger()
 
@@ -180,6 +181,7 @@ class InferenceResult:
     yolo: YOLOResult
     safety: SafetyResult
     qwen: Optional[QwenResult] = None  # Filled when CLIP/YOLO disagree
+    groq: Optional[GroqVisionResult] = None  # Primary multimodal analyser when GROQ_ENABLED
 
 
 # ─── Model Registry (Singleton) ───────────────────────────────────────────
@@ -195,6 +197,7 @@ class ModelRegistry:
     _qwen_processor = None
     _device: str = None
     _qwen_cache: Dict[str, QwenResult] = {}  # Simple hash-based cache for Qwen results
+    _groq_service: Optional[GroqVisionService] = None
 
     @classmethod
     def get_device(cls) -> str:
@@ -308,6 +311,16 @@ class ModelRegistry:
         log.info("inference.qwen_cache_cleared")
 
     @classmethod
+    def get_groq(cls) -> Optional[GroqVisionService]:
+        """Lazy-init the Groq Vision client. Returns None when disabled / no key."""
+        if cls._groq_service is None:
+            svc = GroqVisionService()
+            cls._groq_service = svc
+            if svc.enabled:
+                log.info("inference.groq_ready", model=svc.model)
+        return cls._groq_service if cls._groq_service and cls._groq_service.enabled else None
+
+    @classmethod
     def preload_all(cls) -> None:
         """
         Load the core models eagerly so the first request does not pay the cold-start cost.
@@ -318,6 +331,8 @@ class ModelRegistry:
         cls.get_safety()
         if settings.QWEN_ENABLED:
             cls.get_qwen()
+        if settings.GROQ_ENABLED:
+            cls.get_groq()
         log.info("inference.models_ready")
 
 
@@ -576,14 +591,16 @@ class InferenceEngine:
         filename: str = "",
         user_text: Optional[str] = None,
         yolo_augment: Optional[bool] = None,
+        mime_type: Optional[str] = None,
     ) -> InferenceResult:
-        """Run all models on a single image, using Qwen for verification when needed."""
+        """Run all models on a single image. Groq Vision is the primary multimodal
+        analyser when enabled; Qwen-VL is used as a local fallback."""
         img_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         try:
             # Clear cache before starting inference to maximize headroom
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            
+
             clip_result = self._run_clip(img_pil, user_text=user_text)
         except Exception as exc:
             log.exception(
@@ -596,34 +613,40 @@ class InferenceEngine:
         yolo_result = self._run_yolo(img_pil, augment=yolo_augment)
         yolo_result = self._maybe_refine_yolo_for_school_context(
             img_pil,
-            image_bytes,  # Now passing bytes for Qwen cache key
+            image_bytes,
             yolo_result,
             clip_result,
             augment=yolo_augment,
             filename=filename,
         )
-        
-        # 🤖 NEW Architecture: Qwen is the primary source for activity and description
+
+        # 🌐 PRIMARY: Groq Vision API — full activity + surroundings + journal-title match
+        groq_result = self._run_groq(image_bytes, user_text, mime_type, filename)
+
+        # Fallback: local Qwen-VL only when Groq is unavailable / returned an error
         qwen_result = None
-        if settings.QWEN_ENABLED:
-            # We always use Qwen now for the activity labeling (Right Architecture)
+        groq_usable = groq_result is not None and not groq_result.error
+        if not groq_usable and settings.QWEN_ENABLED:
             qwen_result = QwenVerifier.verify_and_refine(
                 image_bytes, img_pil, clip_result, yolo_result
             )
             if qwen_result:
-                # Update CLIP result with Qwen's refined labels for downstream usage
                 clip_result.detected_activity = qwen_result.activity_label
                 log.info(
                     "inference.activity_labeled_by_qwen",
                     label=qwen_result.activity_label,
                     category=qwen_result.activity_classification,
                 )
-        
+
+        if groq_usable:
+            self._apply_groq_labels(clip_result, yolo_result, groq_result)
+
         return InferenceResult(
             clip=clip_result,
             yolo=yolo_result,
             safety=SafetyResult(nsfw_detected=False, nsfw_score=0.0),
             qwen=qwen_result,
+            groq=groq_result,
         )
 
     def run_batch(
@@ -631,11 +654,12 @@ class InferenceEngine:
         image_batch: List[bytes],
         user_text: Optional[str] = None,
         yolo_augment: Optional[bool] = None,
+        mime_type: Optional[str] = None,
     ) -> List[InferenceResult]:
         """
         GPU-batched inference for throughput efficiency.
         Falls back to sequential if batch fails.
-        Integrates Qwen verification for improved accuracy.
+        Integrates Groq Vision (primary) and Qwen verification (fallback).
         """
         results = []
         try:
@@ -651,12 +675,11 @@ class InferenceEngine:
                     error=str(exc),
                 )
                 clip_results = [self._empty_clip_result() for _ in pil_images]
-            
+
             for i, img_bytes in enumerate(image_batch):
                 clip_res = clip_results[i]
                 yolo_res = self._run_yolo(pil_images[i], augment=yolo_augment)
-                
-                # Fix Bug 1: Correct argument passing to _maybe_refine_yolo_for_school_context
+
                 yolo_res = self._maybe_refine_yolo_for_school_context(
                     pil_images[i],
                     img_bytes,
@@ -665,27 +688,39 @@ class InferenceEngine:
                     augment=yolo_augment,
                     image_index=i,
                 )
-                
-                # 🤖 NEW Architecture: Qwen is the primary source for activity and description
+
+                # 🌐 Groq Vision (primary)
+                groq_res = self._run_groq(
+                    img_bytes, user_text, mime_type, filename=f"batch[{i}]"
+                )
+                groq_usable = groq_res is not None and not groq_res.error
+
+                # Qwen fallback only when Groq is unavailable
                 qwen_res = None
-                if settings.QWEN_ENABLED:
+                if not groq_usable and settings.QWEN_ENABLED:
                     qwen_res = QwenVerifier.verify_and_refine(
                         img_bytes, pil_images[i], clip_res, yolo_res
                     )
                     if qwen_res:
                         clip_res.detected_activity = qwen_res.activity_label
-                
+
+                if groq_usable:
+                    self._apply_groq_labels(clip_res, yolo_res, groq_res)
+
                 safety_res = self._run_safety(img_bytes)
 
                 # 🏫 Unified School Shield
                 school_keywords = [
-                    "Classroom", "Playground", "Lunch", "Assembly", "Math", "Desk", 
-                    "Storytime", "Teacher", "Meeting", "Training", "Library", 
-                    "Reading", "Gym", "Hallway", "Life", "Cafeteria"
+                    "Classroom", "Playground", "Lunch", "Assembly", "Math", "Desk",
+                    "Storytime", "Teacher", "Meeting", "Training", "Library",
+                    "Reading", "Gym", "Hallway", "Life", "Cafeteria",
+                    "Sensory", "Toddler", "Preschool", "Daycare", "Childcare",
                 ]
-                is_school = any(k.lower() in clip_res.detected_activity.lower() for k in school_keywords)
-                
-                # Trust school context up to 99% certainty
+                activity_text = clip_res.detected_activity or ""
+                is_school = any(k.lower() in activity_text.lower() for k in school_keywords)
+                if groq_usable and groq_res.safe == "yes":
+                    is_school = True
+
                 if is_school and safety_res.nsfw_score < 0.99:
                     safety_res.nsfw_detected = False
 
@@ -694,11 +729,56 @@ class InferenceEngine:
                     yolo=yolo_res,
                     safety=safety_res,
                     qwen=qwen_res,
+                    groq=groq_res,
                 ))
         except Exception as e:
             log.warning("inference.batch_fallback", error=str(e))
-            results = [self.run(b) for b in image_batch]
+            results = [self.run(b, user_text=user_text, mime_type=mime_type) for b in image_batch]
         return results
+
+    # ── Groq Vision ──────────────────────────────────────────────────
+
+    def _run_groq(
+        self,
+        image_bytes: bytes,
+        user_text: Optional[str],
+        mime_type: Optional[str],
+        filename: Optional[str] = None,
+    ) -> Optional[GroqVisionResult]:
+        """Run the Groq Vision API on a single image. Returns None if disabled."""
+        groq = ModelRegistry.get_groq()
+        if groq is None:
+            return None
+        try:
+            return groq.analyse(
+                image_bytes=image_bytes,
+                journal_title=user_text,
+                mime_type=mime_type,
+                filename=filename,
+            )
+        except Exception as exc:
+            log.warning("inference.groq_failed", filename=filename, error=str(exc))
+            return None
+
+    def _apply_groq_labels(
+        self,
+        clip_result: CLIPResult,
+        yolo_result: YOLOResult,
+        groq_result: GroqVisionResult,
+    ) -> None:
+        """Push Groq's label / people-count into the CLIP & YOLO result objects so
+        downstream code (scoring, persistence, frontend) sees the unified value."""
+        if groq_result.activity_label and groq_result.activity_label != "Unknown Activity":
+            clip_result.detected_activity = groq_result.activity_label
+
+        # If YOLO missed everyone but Groq sees people, trust Groq for the count.
+        if (
+            groq_result.people_count is not None
+            and yolo_result.people_count == 0
+            and groq_result.people_count > 0
+        ):
+            yolo_result.people_count = groq_result.people_count
+            yolo_result.uncertain_count = groq_result.people_count
 
     # ── CLIP ─────────────────────────────────────────────────────────
 

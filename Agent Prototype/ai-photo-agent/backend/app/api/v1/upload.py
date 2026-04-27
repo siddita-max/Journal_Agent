@@ -38,7 +38,7 @@ SUPPORTED_TYPES = {
 
 DECISION_TO_STATUS = {
     "approved": "approved",
-    "review": "review",
+    "review": "rejected",   # review tier removed — collapsed into rejected
     "rejected": "rejected",
 }
 
@@ -175,6 +175,7 @@ async def evaluate_image(
                 filename,
                 user_text=user_text,
                 yolo_augment=False,
+                mime_type=file.content_type,
             )
         else:
             log.info("pipeline.skipping_ai", reason=prep.rejection_reasons)
@@ -209,6 +210,32 @@ async def evaluate_image(
 
     prep, inf, policy_result, score, storage_path = await loop.run_in_executor(None, _run_pipeline)
 
+    # ── Build a rich activity description preferring Groq output ──────────
+    activity_description = None
+    detected_activity_override = None
+    if inf is not None:
+        if inf.groq and not inf.groq.error:
+            activity_text = (
+                inf.groq.activity_detail
+                or inf.groq.activity_label
+                or inf.groq.activity
+                or ""
+            )
+            surroundings_text = inf.groq.surroundings or ""
+            role_text = inf.groq.role_summary or ""
+            parts = []
+            if role_text:
+                parts.append(f"Role: {role_text}")
+            if activity_text:
+                parts.append(f"Activity: {activity_text}")
+            if surroundings_text:
+                parts.append(f"Surroundings: {surroundings_text}")
+            activity_description = "\n".join(parts) or None
+            if inf.groq.activity_label:
+                detected_activity_override = inf.groq.activity_label
+        elif inf.qwen:
+            activity_description = inf.qwen.activity_description
+
     # ── Persist to DB ─────────────────────────────────────────────────────
     record = ImageRecord(
         job_id=None,                         # standalone upload — no job
@@ -224,7 +251,8 @@ async def evaluate_image(
         people_count=inf.yolo.people_count if inf else None,
         student_count=inf.yolo.student_count if inf else None,
         teacher_count=inf.yolo.teacher_count if inf else None,
-        detected_activity=inf.clip.detected_activity if inf else None,
+        detected_activity=(detected_activity_override or (inf.clip.detected_activity if inf else None)),
+        activity_description=activity_description,
         phone_detected=inf.yolo.phone_detected if inf else None,
         detected_objects=inf.yolo.detections if inf else None,
         nsfw_detected=inf.safety.nsfw_detected if inf else False,
@@ -266,13 +294,45 @@ async def evaluate_image(
     # ── Response ──────────────────────────────────────────────────────────
     # Focus only on high-level results, hiding all internal ML details
     decision = (score.decision or "rejected").lower()
+    if decision == "review":
+        decision = "rejected"
     status = DECISION_TO_STATUS.get(decision, "rejected")
     reason = None
-    if status == "review":
-        reason = "; ".join(score.reasons) or "Image requires manual review"
-    elif status == "rejected":
-        # Combine all reasons into a single clean string
+    if status == "rejected":
         reason = "; ".join(score.reasons) or "Image rejected by policy"
+
+    is_approved = decision == "approved"
+
+    groq_payload = None
+    if is_approved and inf and inf.groq and not inf.groq.error:
+        groq_payload = {
+            "activity": inf.groq.activity,
+            "activity_label": inf.groq.activity_label,
+            "activity_detail": inf.groq.activity_detail,
+            "surroundings": inf.groq.surroundings,
+            "people_count": inf.groq.people_count,
+            "role_summary": inf.groq.role_summary,
+            "matches_journal": inf.groq.matches_journal,
+            "match_reason": inf.groq.match_reason,
+            "confidence": inf.groq.confidence,
+            "safe": inf.groq.safe,
+            "quality_note": inf.groq.quality_note,
+        }
+
+    scene_context = {
+        "total_people": inf.yolo.people_count if inf else 0,
+        "students": inf.yolo.student_count if inf else 0,
+        "teachers": inf.yolo.teacher_count if inf else 0,
+        "match_score": round(inf.clip.semantic_score * 100, 1) if inf else None,
+    }
+    if is_approved and inf:
+        scene_context["activity"] = (
+            (inf.groq.activity_label if inf.groq and not inf.groq.error and inf.groq.activity_label else None)
+            or inf.clip.detected_activity
+            or "Unknown"
+        )
+        scene_context["activity_detail"] = inf.groq.activity_detail if inf.groq and not inf.groq.error else None
+        scene_context["surroundings"] = inf.groq.surroundings if inf.groq and not inf.groq.error else None
 
     return {
         "image_id": str(record.id),
@@ -280,13 +340,8 @@ async def evaluate_image(
         "decision": decision,
         "status": status,
         "reason": reason,
-        "scene_context": {
-            "total_people": inf.yolo.people_count if inf else 0,
-            "students": inf.yolo.student_count if inf else 0,
-            "teachers": inf.yolo.teacher_count if inf else 0,
-            "activity": inf.clip.detected_activity if inf else "Unknown",
-            "match_score": round(inf.clip.semantic_score * 100, 1) if inf else None
-        }
+        "scene_context": scene_context,
+        "groq": groq_payload,
     }
 
 
@@ -358,7 +413,6 @@ async def evaluate_batch(
         "total": len(results),
         "approved": sum(1 for r in results if (r.get("decision") or r.get("status")) == "approved"),
         "rejected": sum(1 for r in results if (r.get("decision") or r.get("status")) == "rejected"),
-        "review": sum(1 for r in results if (r.get("decision") or r.get("status")) == "review"),
     }
 
     return {"summary": summary, "results": results}

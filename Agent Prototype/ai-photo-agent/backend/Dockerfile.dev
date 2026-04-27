@@ -31,7 +31,7 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 
 # ─── Celery Worker ────────────────────────────────────────────────
 FROM base AS worker
-CMD ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "--concurrency=2", "-Q", "photo_processing,default"]
+CMD ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "--concurrency=2", "-Q", "job_orchestration,photo_processing,default"]
 
 # ─── Celery Beat ──────────────────────────────────────────────────
 FROM base AS beat

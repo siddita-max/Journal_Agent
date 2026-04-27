@@ -60,7 +60,7 @@ services:
       dockerfile: Dockerfile.dev
       target: api
     container_name: photo_agent_api_dev
-    env_file: .env
+    env_file: .env   # loads GROQ_API_KEY, GROQ_MODEL, GROQ_ENABLED, … from ./.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-photo_agent}:${POSTGRES_PASSWORD:-photo_agent_secret}@postgres:5432/${POSTGRES_DB:-photo_agent_db}
       - REDIS_URL=redis://redis:6379/0
@@ -69,6 +69,7 @@ services:
       # CLIP_MODEL_NAME and YOLO_MODEL_PATH intentionally NOT overridden here
       # — the .env file values (ViT-L/14@336px, yolov8s.pt) are used directly
       - QWEN_ENABLED=false
+      - GROQ_ENABLED=${GROQ_ENABLED:-true}
     volumes:
       - ./backend:/app
       - model_cache_dev:/root/.cache
@@ -88,8 +89,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
       target: worker
+    command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "--pool=solo", "-Q", "job_orchestration,photo_processing,default"]
     container_name: photo_agent_worker_dev
-    env_file: .env
+    env_file: .env   # loads GROQ_API_KEY, GROQ_MODEL, GROQ_ENABLED, … from ./.env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-photo_agent}:${POSTGRES_PASSWORD:-photo_agent_secret}@postgres:5432/${POSTGRES_DB:-photo_agent_db}
       - REDIS_URL=redis://redis:6379/0
@@ -98,6 +100,7 @@ services:
       # CLIP_MODEL_NAME and YOLO_MODEL_PATH intentionally NOT overridden here
       # — the .env file values (ViT-L/14@336px, yolov8s.pt) are used directly
       - QWEN_ENABLED=false
+      - GROQ_ENABLED=${GROQ_ENABLED:-true}
     volumes:
       - ./backend:/app
       - model_cache_dev:/root/.cache

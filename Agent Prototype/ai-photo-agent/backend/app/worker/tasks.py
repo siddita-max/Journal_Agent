@@ -75,13 +75,25 @@ def process_photo_job(self: Task, job_id: str):
         try:
             storage.ensure_buckets()
 
+            # Preserve the journal_title we stashed at job-creation time.
+            preserved = job.policy_snapshot or {}
+            journal_title = preserved.get("journal_title", "") if isinstance(preserved, dict) else ""
+
             # Snapshot the DB-stored school journal policy when available.
             stored_policy = db.query(PolicyConfig).filter(
                 PolicyConfig.name == "school_journal_policy_v1",
                 PolicyConfig.is_active == True,
             ).first()
-            job.policy_snapshot = stored_policy.rules if stored_policy else get_school_child_safety_policy()
-            log.info("job.policy_loaded", policy_name=job.policy_snapshot["name"])
+            policy_doc = stored_policy.rules if stored_policy else get_school_child_safety_policy()
+            if journal_title:
+                policy_doc = dict(policy_doc)
+                policy_doc["journal_title"] = journal_title
+            job.policy_snapshot = policy_doc
+            log.info(
+                "job.policy_loaded",
+                policy_name=job.policy_snapshot.get("name"),
+                journal_title=journal_title or None,
+            )
             db.commit()
 
             # Fetch image list
@@ -188,12 +200,47 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
             # ── Step 3: AI Inference (skip if hard-rejected) ──────
             inf_result = None
             if prep_result.ok:
-                inf_result = inference.run(image_bytes, filename, yolo_augment=True)
+                # Pull the journal title from the policy snapshot so Groq can
+                # filter against it.
+                journal_title = ""
+                if isinstance(policy_rules, dict):
+                    journal_title = (policy_rules.get("journal_title") or "").strip()
+                inf_result = inference.run(
+                    image_bytes,
+                    filename,
+                    yolo_augment=True,
+                    user_text=journal_title or None,
+                    mime_type=file_meta.get("mime_type"),
+                )
                 record.people_count = inf_result.yolo.people_count
                 record.student_count = inf_result.yolo.student_count
                 record.teacher_count = inf_result.yolo.teacher_count
                 record.detected_activity = inf_result.clip.detected_activity
-                record.activity_description = inf_result.qwen.activity_description if inf_result.qwen else None
+
+                # Prefer Groq's rich activity + surroundings narrative; fall back to Qwen.
+                if inf_result.groq and not inf_result.groq.error:
+                    activity_text = (
+                        inf_result.groq.activity_detail
+                        or inf_result.groq.activity_label
+                        or inf_result.groq.activity
+                        or ""
+                    )
+                    surroundings_text = inf_result.groq.surroundings or ""
+                    role_text = inf_result.groq.role_summary or ""
+                    parts = []
+                    if role_text:
+                        parts.append(f"Role: {role_text}")
+                    if activity_text:
+                        parts.append(f"Activity: {activity_text}")
+                    if surroundings_text:
+                        parts.append(f"Surroundings: {surroundings_text}")
+                    record.activity_description = "\n".join(parts) or None
+                    # Use the human-readable label as the short detected_activity tag
+                    if inf_result.groq.activity_label:
+                        record.detected_activity = inf_result.groq.activity_label
+                elif inf_result.qwen:
+                    record.activity_description = inf_result.qwen.activity_description
+
                 record.phone_detected = inf_result.yolo.phone_detected
                 record.detected_objects = inf_result.yolo.detections
                 record.nsfw_detected = inf_result.safety.nsfw_detected

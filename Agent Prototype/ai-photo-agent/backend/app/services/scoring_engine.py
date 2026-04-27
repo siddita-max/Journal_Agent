@@ -97,12 +97,11 @@ class ScoringEngine:
         # ── 1. Policy Violations (Top Priority) ─────────────────────
         policy_reasons = []
         nsfw_detected = False
-        
+
         if policy_result and policy_result.hard_rejected:
             policy_reasons.extend(policy_result.reasons)
 
         if policy_reasons:
-            # Add Qwen's explanation if available for more detail
             if inference and inference.qwen and inference.qwen.rejection_explanation:
                 policy_reasons.append(f"AI Analysis: {inference.qwen.rejection_explanation}")
 
@@ -113,10 +112,53 @@ class ScoringEngine:
                 hard_rejected=True
             )
 
-        # ── 1.5. User Match Check ──────────────────────────────────
-        # If the user provided a search text and it matches poorly (< 30%)
-        # We check match_active to ensure we don't reject photos when no search was requested
-        if inference and inference.clip.match_active and inference.clip.semantic_score < 0.28:
+        # ── 1.4. Groq Vision: journal-title match (hard filter) ─────
+        # When the user supplied a journal title and Groq's vision model
+        # decides the photo doesn't relate to it → hard rejection. This is
+        # the primary filter the user requested ("only select the photos
+        # that are relating to the journal title I give").
+        if (
+            settings.GROQ_MATCH_REQUIRED
+            and inference
+            and inference.groq
+            and not inference.groq.error
+            and inference.groq.extra.get("journal_title")
+            and not str(inference.groq.extra.get("journal_title", "")).lower().startswith("(no journal")
+        ):
+            groq = inference.groq
+            if groq.matches_journal == "no":
+                reason = groq.match_reason or "AI determined the photo does not relate to the journal title"
+                return ScoreResult(
+                    final_score=0.0,
+                    decision=Decision.REJECTED,
+                    reasons=[f"Off-topic for journal: {reason}"],
+                    hard_rejected=True,
+                )
+            if groq.safe == "no":
+                return ScoreResult(
+                    final_score=0.0,
+                    decision=Decision.REJECTED,
+                    reasons=[
+                        "AI flagged photo as not safe for a school journal: "
+                        + (groq.match_reason or "unsafe content detected")
+                    ],
+                    hard_rejected=True,
+                )
+
+        # ── 1.5. User Match Check (legacy CLIP fallback) ───────────
+        # Only kicks in when Groq is not available; otherwise Groq above is authoritative.
+        groq_was_authoritative = (
+            inference
+            and inference.groq
+            and not inference.groq.error
+            and inference.groq.matches_journal == "yes"
+        )
+        if (
+            not groq_was_authoritative
+            and inference
+            and inference.clip.match_active
+            and inference.clip.semantic_score < 0.28
+        ):
             return ScoreResult(
                 final_score=0.0,
                 decision=Decision.REJECTED,
@@ -144,17 +186,18 @@ class ScoringEngine:
         object_score = policy_result.compliance_score if policy_result else self._object_score(inference)
         aesthetic_score = self._aesthetic_score(preprocess, inference)
 
-        # ── 2.5. Quality Gate (Right Architecture) ──────────────────
-        # Straight rejection for low resolution (below Standard HD) or poor sharpness
-        # even if they pass the absolute minimums in Preprocessing.
-        if resolution_score < 0.6:  # Below 1280x720 (Standard HD)
+        # ── 2.5. Quality Gate ────────────────────────────────────────
+        # Only hard-reject truly unusable images (below 640×480).
+        # Preprocessing already enforces MIN_RESOLUTION; the resolution
+        # score feeds into the weighted final score for everything else.
+        if resolution_score == 0.0:  # Below 640×480
             return ScoreResult(
                 final_score=0.0,
                 decision=Decision.REJECTED,
-                reasons=["Low resolution (below Standard HD 720p)"],
+                reasons=["Image resolution too low (below 640×480)"],
                 hard_rejected=True
             )
-        
+
         if quality_score < 0.5:
             return ScoreResult(
                 final_score=0.0,
@@ -185,21 +228,27 @@ class ScoringEngine:
             object_score,
             inference,
         )
-        if policy_result and policy_result.flagged:
-            reasons.extend(policy_result.reasons)
-            decision = Decision.REVIEW
-        elif inference and inference.qwen and inference.qwen.safety_assessment == "review":
-            reasons.append(f"AI Flag: {inference.qwen.rejection_explanation or 'Context needs manual review'}")
-            decision = Decision.REVIEW
-        elif final_score >= self.approved_threshold:
+        # ⚖ Binary decision: only APPROVED or REJECTED — review tier removed.
+        # Anything that would have been "review" is now treated as a rejection
+        # so the journal only contains photos we are confident about.
+        if final_score >= self.approved_threshold:
             decision = Decision.APPROVED
-        elif final_score >= self.review_threshold:
-            decision = Decision.REVIEW
+            if policy_result and policy_result.flagged:
+                # Soft policy flags don't block but are surfaced as reasons.
+                reasons.extend(policy_result.reasons)
         else:
             decision = Decision.REJECTED
-            # Add Qwen's explanation for soft-rejection too
+            if policy_result and policy_result.flagged:
+                reasons.extend(policy_result.reasons)
+            if final_score >= self.review_threshold:
+                reasons.append(
+                    f"Borderline confidence ({final_score:.2f}) — below approve threshold "
+                    f"{self.approved_threshold:.2f}"
+                )
             if inference and inference.qwen and inference.qwen.rejection_explanation:
                 reasons.append(f"AI Feedback: {inference.qwen.rejection_explanation}")
+            if inference and inference.groq and inference.groq.match_reason and not inference.groq.error:
+                reasons.append(f"Groq Note: {inference.groq.match_reason}")
 
         breakdown = {
             "weights": {

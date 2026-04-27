@@ -26,6 +26,12 @@ class CreateJobRequest(BaseModel):
         description="Full Google Drive folder URL. The service account must have Viewer access.",
         examples=["https://drive.google.com/drive/folders/1A2B3C4D5E6F7G8H9I0J"],
     )
+    journal_title: Optional[str] = Field(
+        None,
+        description="Journal title used by the Groq Vision API to filter photos. "
+                    "Only photos whose detected scene matches this title will be approved.",
+        examples=["Sensory Play", "Robotics Workshop", "Outdoor Exploration"],
+    )
 
     @field_validator("drive_folder_url")
     @classmethod
@@ -39,6 +45,7 @@ class CreateJobRequest(BaseModel):
 class JobResponse(BaseModel):
     id: str = Field(..., description="Unique job UUID", examples=["550e8400-e29b-41d4-a716-446655440000"])
     drive_folder_url: str = Field(..., description="Original Drive folder URL submitted")
+    journal_title: Optional[str] = Field(None, description="Journal title used to filter photos via Groq Vision")
     status: str = Field(..., description="Job lifecycle status", examples=["processing"])
     total_images: int = Field(..., description="Total image files found in the Drive folder")
     processed_images: int = Field(..., description="Images fully processed so far")
@@ -123,16 +130,21 @@ async def create_job(
             ),
         )
 
+    journal_title = (payload.journal_title or "").strip()
     job = ProcessingJob(
         drive_folder_url=payload.drive_folder_url,
         drive_folder_id=folder_id,
         status=JobStatus.PENDING,
+        # Stash the journal title here so the worker can pass it to Groq.
+        # The worker overwrites this with the active policy doc at start, but
+        # always preserves the journal_title key.
+        policy_snapshot={"journal_title": journal_title} if journal_title else None,
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
-    process_photo_job.apply_async(args=[str(job.id)], queue="photo_processing")
+    process_photo_job.apply_async(args=[str(job.id)], queue="job_orchestration")
 
     log.info("api.job_created", job_id=str(job.id), folder_id=folder_id)
     return _to_response(job)
@@ -271,9 +283,13 @@ async def _get_or_404(job_id: str, db: AsyncSession) -> ProcessingJob:
 
 
 def _to_response(job: ProcessingJob) -> dict:
+    # Extract the journal_title we stashed in policy_snapshot.
+    snapshot = job.policy_snapshot or {}
+    journal_title = snapshot.get("journal_title", "") if isinstance(snapshot, dict) else ""
     return {
         "id": str(job.id),
         "drive_folder_url": job.drive_folder_url,
+        "journal_title": journal_title or None,
         "status": job.status.value,
         "total_images": job.total_images or 0,
         "processed_images": job.processed_images or 0,
