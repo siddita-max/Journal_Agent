@@ -208,15 +208,6 @@
                   type="text"
                 />
               </div>
-              <div class="flex flex-col gap-2">
-                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest" for="logoUrl">School Logo URL <span class="normal-case font-normal text-slate-300">(optional)</span></label>
-                <input
-                  id="logoUrl"
-                  class="w-full bg-slate-50/50 border border-slate-100 focus:bg-white focus:ring-4 focus:ring-teal-500/5 focus:border-teal-500 transition-all rounded-xl font-body-md text-sm py-3 px-4 outline-none"
-                  placeholder="https://... or leave blank"
-                  type="url"
-                />
-              </div>
             </div>
 
             <input id="fileInput" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" multiple hidden />
@@ -506,7 +497,6 @@
           lastUpdated: document.getElementById("lastUpdated"),
           sysStatus: document.getElementById("sysStatus"),
           className: document.getElementById("className"),
-          logoUrl: document.getElementById("logoUrl"),
           btnSelectPhotos: document.getElementById("btnSelectPhotos"),
           btnUseDrive: document.getElementById("btnUseDrive"),
           btnSubmit: document.getElementById("btnSubmit"),
@@ -568,10 +558,8 @@
         }
 
         function showPreviewButton(jobId) {
-          const logo      = (els.logoUrl.value || "").trim();
           const className = (els.className.value || "").trim();
           const params    = new URLSearchParams({ job_id: jobId, api: API_BASE });
-          if (logo)      params.set("logo",       logo);
           if (className) params.set("class_name", className);
           els.btnPreview.href = `journal_preview.html?${params.toString()}`;
           els.btnPreview.classList.remove("hidden");
@@ -1220,7 +1208,6 @@
           els.driveUrl.value = "";
           els.journalTitle.value = "";
           els.className.value = "";
-          els.logoUrl.value = "";
           els.fileInput.value = "";
           els.btnPreview.classList.add("hidden");
           els.btnPreview.href = "#";

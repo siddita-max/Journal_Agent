@@ -374,6 +374,7 @@ def _to_summary(img: ImageRecord) -> dict:
     activity_detail = None
     surroundings = None
     groq_role_summary = None
+    scene_summary = None
     desc = (img.activity_description or "").strip()
     if desc:
         for line in desc.splitlines():
@@ -384,6 +385,8 @@ def _to_summary(img: ImageRecord) -> dict:
                 activity_detail = stripped.split(":", 1)[1].strip() or None
             elif stripped.lower().startswith("surroundings:"):
                 surroundings = stripped.split(":", 1)[1].strip() or None
+            elif stripped.lower().startswith("summary:"):
+                scene_summary = stripped.split(":", 1)[1].strip() or None
 
     # When YOLO found no students/teachers, use Groq's role summary as the
     # displayed role (e.g. "1 parent, 1 child, 1 teacher").
@@ -418,6 +421,7 @@ def _to_summary(img: ImageRecord) -> dict:
         "activity_description": img.activity_description if is_approved else None,
         "activity_detail": activity_detail if is_approved else None,
         "surroundings": surroundings if is_approved else None,
+        "scene_summary": scene_summary if is_approved else None,
         "student_count": img.student_count,
         "teacher_count": img.teacher_count,
     }

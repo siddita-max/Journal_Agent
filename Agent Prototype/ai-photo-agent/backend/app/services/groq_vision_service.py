@@ -42,6 +42,8 @@ SYSTEM_PROMPT = (
     "You are a school-photo curator. Return ONLY a JSON object — no markdown, no text outside JSON. "
     "Keys: activity (snake_case), activity_label (3-6 words), activity_detail (≤20 words: what subjects do), "
     "surroundings (≤15 words: setting), people_count (int), role_summary (e.g. '2 children+1 teacher'), "
+    "scene_summary (one full sentence ≤30 words starting with the people present e.g. "
+    "'Two teachers and five students are engaged in outdoor nature exploration with magnifying glasses.'), "
     "matches_journal (yes/no: does scene relate to JOURNAL TITLE?), match_reason (≤10 words), "
     "confidence (high/medium/low), safe (yes/no for school), "
     "quality (good=sharp+well-lit / acceptable=minor issues / poor=blurry or unusable), "
@@ -67,6 +69,7 @@ class GroqVisionResult:
     surroundings: str = ""
     people_count: Optional[int] = None
     role_summary: str = ""
+    scene_summary: str = ""  # One full sentence: who is present + what they're doing
     matches_journal: str = "unknown"  # "yes" | "no" | "unknown"
     match_reason: str = ""
     confidence: str = "low"
@@ -422,6 +425,7 @@ class GroqVisionService:
             surroundings=_str("surroundings", ""),
             people_count=people_count,
             role_summary=_str("role_summary", ""),
+            scene_summary=_str("scene_summary", ""),
             matches_journal=matches,
             match_reason=_str("match_reason", ""),
             confidence=confidence,

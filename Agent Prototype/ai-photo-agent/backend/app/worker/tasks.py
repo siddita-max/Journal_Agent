@@ -227,6 +227,7 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
                     )
                     surroundings_text = inf_result.groq.surroundings or ""
                     role_text = inf_result.groq.role_summary or ""
+                    scene_summary_text = inf_result.groq.scene_summary or ""
                     parts = []
                     if role_text:
                         parts.append(f"Role: {role_text}")
@@ -234,6 +235,8 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
                         parts.append(f"Activity: {activity_text}")
                     if surroundings_text:
                         parts.append(f"Surroundings: {surroundings_text}")
+                    if scene_summary_text:
+                        parts.append(f"Summary: {scene_summary_text}")
                     record.activity_description = "\n".join(parts) or None
                     # Use the human-readable label as the short detected_activity tag
                     if inf_result.groq.activity_label:
