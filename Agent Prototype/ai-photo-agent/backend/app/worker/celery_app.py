@@ -53,15 +53,8 @@ def warm_up_models(**kwargs):
         ModelRegistry.get_clip()
         ModelRegistry.get_yolo()
         ModelRegistry.get_safety()
-        # Qwen is large (~7 GB) — only warm up if it's enabled AND the model
-        # is already cached locally. If not cached it will be skipped at
-        # inference time and CLIP/YOLO results will be used directly.
-        if settings.QWEN_ENABLED:
-            try:
-                ModelRegistry.get_qwen()
-                log.info("inference.qwen_warmup_complete")
-            except Exception as qwen_exc:
-                log.warning("inference.qwen_warmup_skipped", error=str(qwen_exc))
+        if settings.GROQ_ENABLED:
+            ModelRegistry.get_groq()
         log.info("inference.warmup_complete")
     except Exception as exc:
         log.warning("inference.warmup_failed", error=str(exc))

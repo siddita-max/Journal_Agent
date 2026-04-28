@@ -217,7 +217,7 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
                 record.teacher_count = inf_result.yolo.teacher_count
                 record.detected_activity = inf_result.clip.detected_activity
 
-                # Prefer Groq's rich activity + surroundings narrative; fall back to Qwen.
+                # Use Groq's rich activity + surroundings narrative.
                 if inf_result.groq and not inf_result.groq.error:
                     activity_text = (
                         inf_result.groq.activity_detail
@@ -238,8 +238,6 @@ def process_single_image(self: Task, job_id: str, file_meta: dict, policy_rules:
                     # Use the human-readable label as the short detected_activity tag
                     if inf_result.groq.activity_label:
                         record.detected_activity = inf_result.groq.activity_label
-                elif inf_result.qwen:
-                    record.activity_description = inf_result.qwen.activity_description
 
                 record.phone_detected = inf_result.yolo.phone_detected
                 record.detected_objects = inf_result.yolo.detections

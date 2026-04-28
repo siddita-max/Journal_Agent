@@ -1,15 +1,11 @@
 """
-AI Inference Layer — CLIP, YOLOv8, Qwen, and Safety Model inference.
+AI Inference Layer — CLIP, YOLOv8, Groq Vision, and Safety Model inference.
 Models are singletons loaded once at worker startup.
-GPU batching is used for throughput efficiency.
-Qwen provides verification & activity refinement when CLIP/YOLO disagree.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any
 import io
-import hashlib
-import gc
 
 import clip
 import numpy as np
@@ -77,52 +73,6 @@ SHARP_OBJECT_CLASSES = {"scissors", "knife", "fork"}
 ROLE_CONFIDENCE_MARGIN = 3.0
 ROLE_MIN_VOTE = 22.0
 
-# ─── Canonical Activities ──────────────────────────────────────────────────
-CANONICAL_ACTIVITIES = {
-    "classroom_learning",
-    "outdoor_play",
-    "lunch_dining",
-    "sports_activity",
-    "assembly_event",
-    "library_reading",
-    "hallway_movement",
-    "group_project",
-    "teacher_meeting",
-    "arts_crafts",
-    "computer_lab",
-    "pe_gym",
-    "other",
-}
-
-def normalise_activity(raw_label: str) -> str:
-    """Map Qwen's free-form label to a canonical category for filtering."""
-    raw = raw_label.lower()
-    if any(w in raw for w in ["cook", "food", "kitchen", "bak"]):
-        return "arts_crafts"
-    if any(w in raw for w in ["class", "lesson", "desk", "board", "studying"]):
-        return "classroom_learning"
-    if any(w in raw for w in ["play", "outside", "recess", "yard", "playground"]):
-        return "outdoor_play"
-    if any(w in raw for w in ["lunch", "eat", "dining", "cafeteria"]):
-        return "lunch_dining"
-    if any(w in raw for w in ["sport", "football", "soccer", "basketball", "field"]):
-        return "sports_activity"
-    if any(w in raw for w in ["gym", "pe", "physical"]):
-        return "pe_gym"
-    if any(w in raw for w in ["assembly", "theater", "performance", "stage"]):
-        return "assembly_event"
-    if any(w in raw for w in ["library", "book", "reading"]):
-        return "library_reading"
-    if any(w in raw for w in ["computer", "lab", "coding", "typing"]):
-        return "computer_lab"
-    if any(w in raw for w in ["art", "craft", "painting", "drawing"]):
-        return "arts_crafts"
-    if any(w in raw for w in ["hallway", "corridor", "walking"]):
-        return "hallway_movement"
-    if any(w in raw for w in ["meeting", "staff", "training"]):
-        return "teacher_meeting"
-    return "other"
-
 
 # ─── Result Dataclasses ───────────────────────────────────────────────────
 
@@ -160,27 +110,10 @@ class SafetyResult:
 
 
 @dataclass
-class QwenResult:
-    """Qwen vision-language model results for verification & activity refinement."""
-    activity_classification: str = "other"  # Canonical category
-    activity_label: str = ""               # 3-6 words descriptive label
-    activity_description: str = ""         # One specific sentence (max 20 words)
-    activity_confidence: str = "low"       # high | medium | low
-    people_count_estimate: Optional[int] = None
-    safety_assessment: str = "safe"        # safe | review
-    rejection_explanation: str = ""
-    notes: str = ""
-    used_for_verification: bool = False
-    verification_reason: str = ""
-    processing_time_ms: float = 0.0
-
-
-@dataclass
 class InferenceResult:
     clip: CLIPResult
     yolo: YOLOResult
     safety: SafetyResult
-    qwen: Optional[QwenResult] = None  # Filled when CLIP/YOLO disagree
     groq: Optional[GroqVisionResult] = None  # Primary multimodal analyser when GROQ_ENABLED
 
 
@@ -193,10 +126,7 @@ class ModelRegistry:
     _clip_preprocess = None
     _yolo_model = None
     _safety_model = None
-    _qwen_model = None
-    _qwen_processor = None
     _device: str = None
-    _qwen_cache: Dict[str, QwenResult] = {}  # Simple hash-based cache for Qwen results
     _groq_service: Optional[GroqVisionService] = None
 
     @classmethod
@@ -239,78 +169,6 @@ class ModelRegistry:
         return cls._safety_model
 
     @classmethod
-    def get_qwen(cls):
-        """Lazy-load Qwen2-VL model if enabled. Returns (model, processor) tuple or (None, None)."""
-        if not settings.QWEN_ENABLED:
-            return None, None
-        
-        if cls._qwen_model is None:
-            try:
-                from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
-                device = settings.get_qwen_device()
-                model_name = settings.get_qwen_model_name()
-                log.info("inference.loading_qwen", model=model_name, device=device)
-                
-                cls._qwen_processor = AutoProcessor.from_pretrained(
-                    model_name,
-                    min_pixels=256 * 28 * 28,
-                    max_pixels=512 * 28 * 28,  # Keep memory low: max ~512 visual tokens
-                )
-
-                if device == "cpu":
-                    cls._qwen_model = Qwen2VLForConditionalGeneration.from_pretrained(
-                        model_name,
-                        torch_dtype=torch.float32,
-                        device_map="cpu",
-                    )
-                else:
-                    # 4-bit quantization: 2B model uses ~2 GB VRAM, well within RTX 3050 4 GB
-                    try:
-                        from transformers import BitsAndBytesConfig
-                        bnb_cfg = BitsAndBytesConfig(
-                            load_in_4bit=True,
-                            bnb_4bit_compute_dtype=torch.float16,
-                            bnb_4bit_use_double_quant=True,
-                            bnb_4bit_quant_type="nf4",
-                        )
-                        cls._qwen_model = Qwen2VLForConditionalGeneration.from_pretrained(
-                            model_name,
-                            quantization_config=bnb_cfg,
-                            device_map="auto",
-                            # Reserve 1.2GB for CLIP/YOLO/Context on 4GB cards
-                            max_memory={0: "2800MiB", "cpu": "16GiB"}
-                        )
-                        log.info("inference.qwen_4bit_quantized", max_mem="2800MiB")
-                    except ImportError:
-                        # bitsandbytes not available — fall back to fp16
-                        log.warning("inference.qwen_bnb_unavailable", msg="Install bitsandbytes for 4-bit quant")
-                        cls._qwen_model = Qwen2VLForConditionalGeneration.from_pretrained(
-                            model_name,
-                            torch_dtype=torch.float16,
-                            device_map="auto",
-                            max_memory={0: "2800MiB", "cpu": "16GiB"}
-                        )
-                
-                cls._qwen_model.eval()
-                log.info("inference.qwen_ready", model=model_name)
-            except ImportError as e:
-                log.warning("inference.qwen_unavailable", error=str(e))
-                cls._qwen_model = None
-                cls._qwen_processor = None
-            except Exception as e:
-                log.error("inference.qwen_load_failed", error=str(e))
-                cls._qwen_model = None
-                cls._qwen_processor = None
-        
-        return cls._qwen_model, cls._qwen_processor
-
-    @classmethod
-    def clear_qwen_cache(cls):
-        """Clear the Qwen result cache."""
-        cls._qwen_cache.clear()
-        log.info("inference.qwen_cache_cleared")
-
-    @classmethod
     def get_groq(cls) -> Optional[GroqVisionService]:
         """Lazy-init the Groq Vision client. Returns None when disabled / no key."""
         if cls._groq_service is None:
@@ -329,8 +187,6 @@ class ModelRegistry:
         cls.get_clip()
         cls.get_yolo()
         cls.get_safety()
-        if settings.QWEN_ENABLED:
-            cls.get_qwen()
         if settings.GROQ_ENABLED:
             cls.get_groq()
         log.info("inference.models_ready")
@@ -348,242 +204,11 @@ def ensemble_clip_score(image_features, prompts: List[str], model, preprocess=No
     return float(similarities.mean().item())
 
 
-# ─── Qwen Verification Engine ────────────────────────────────────────────
-
-class QwenVerifier:
-    """
-    Uses Qwen for verification when CLIP and YOLO disagree significantly.
-    Also refines activity classification when confidence is low.
-    Implements efficient caching and early-exit logic.
-    """
-
-    DISAGREEMENT_THRESHOLD = 0.25  # Disagreement if predictions differ by >25%
-    LOW_CONFIDENCE_THRESHOLD = 0.50  # Use Qwen if confidence < 50%
-    
-    @staticmethod
-    def _get_cache_key(image_bytes: bytes) -> str:
-        """Generate a hash-based cache key for an image."""
-        return hashlib.md5(image_bytes).hexdigest()
-    
-    @classmethod
-    def _check_disagreement(cls, clip_result: CLIPResult, yolo_result: YOLOResult) -> Tuple[bool, str]:
-        """
-        Detect significant disagreement between CLIP and YOLO.
-        Returns (has_disagreement, reason).
-        """
-        # Check 1: Activity type mismatch
-        clip_activity = clip_result.detected_activity.lower()
-        yolo_people = yolo_result.people_count
-        
-        # If CLIP says indoor classroom but YOLO detects 0 people
-        if "classroom" in clip_activity and yolo_people == 0:
-            return True, "clip_indoor_vs_yolo_no_people"
-        
-        # If CLIP says playground but YOLO detects minimal movement/people
-        if "playground" in clip_activity and yolo_people < 2:
-            return True, "clip_outdoor_vs_yolo_few_people"
-        
-        # Check 2: Safety flag mismatch
-        if yolo_result.sharp_object_detected and clip_result.semantic_score > 0.75:
-            return True, "yolo_risk_vs_clip_confidence"
-        
-        # Check 3: Confidence level mismatch
-        if clip_result.semantic_score < cls.LOW_CONFIDENCE_THRESHOLD:
-            if yolo_people > 0:  # YOLO has clear detections
-                return True, "clip_low_confidence_vs_yolo_detections"
-        
-        # Check 4: Activity confidence vs people count
-        if "unknown" in clip_activity and yolo_people >= 3:
-            return True, "clip_unknown_vs_yolo_group"
-        
-        return False, ""
-
-    @classmethod
-    def should_use_qwen(cls, clip_result: CLIPResult, yolo_result: YOLOResult) -> Tuple[bool, str]:
-        """
-        Determine if Qwen should be invoked.
-        In the new architecture, Qwen is the primary source for activity labeling.
-        """
-        if not settings.QWEN_ENABLED:
-            return False, "qwen_disabled"
-        
-        # We always use Qwen for activity and description in the Right Architecture
-        return True, "activity_labeling"
-
-    @classmethod
-    def verify_and_refine(
-        cls,
-        image_bytes: bytes,
-        img_pil: Image.Image,
-        clip_result: CLIPResult,
-        yolo_result: YOLOResult,
-    ) -> Optional[QwenResult]:
-        """
-        Use Qwen to verify/refine results when CLIP and YOLO disagree.
-        Implements caching for efficiency.
-        Returns QwenResult or None.
-        """
-        should_use, reason = cls.should_use_qwen(clip_result, yolo_result)
-        if not should_use:
-            return None
-        
-        # Check cache
-        if settings.QWEN_CACHE_ENABLED:
-            cache_key = cls._get_cache_key(image_bytes)
-            if cache_key in ModelRegistry._qwen_cache:
-                cached = ModelRegistry._qwen_cache[cache_key]
-                log.info("inference.qwen_cache_hit", reason=reason)
-                return cached
-        
-        # Invoke Qwen
-        try:
-            import time
-            start_time = time.time()
-            
-            qwen_model, qwen_processor = ModelRegistry.get_qwen()
-            if qwen_model is None:
-                return None
-            
-            # Build the prompt
-            prompt = cls._build_prompt(clip_result, yolo_result)
-            device = settings.get_qwen_device()
-
-            # ── Qwen2-VL message format ──────────────────────────────────
-            from qwen_vl_utils import process_vision_info
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": img_pil},
-                        {"type": "text", "text": prompt},
-                    ],
-                }
-            ]
-            text_input = qwen_processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-            image_inputs, video_inputs = process_vision_info(messages)
-            inputs = qwen_processor(
-                text=[text_input],
-                images=image_inputs,
-                videos=video_inputs,
-                padding=True,
-                return_tensors="pt",
-            )
-            if device == "cuda":
-                inputs = inputs.to("cuda")
-            
-            with torch.no_grad():
-                outputs = qwen_model.generate(
-                    **inputs,
-                    max_new_tokens=150,
-                    do_sample=False,
-                )
-                # Trim prompt tokens from output
-                trimmed = outputs[:, inputs["input_ids"].shape[-1]:]
-                response = qwen_processor.batch_decode(
-                    trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-                )[0]
-            
-            # Clean up after heavy Qwen run
-            del inputs, outputs, trimmed
-            if device == "cuda":
-                torch.cuda.empty_cache()
-                gc.collect()
-            
-            # Parse response
-            qwen_result = cls._parse_qwen_response(response, time.time() - start_time, reason)
-            
-            # Cache result
-            if settings.QWEN_CACHE_ENABLED:
-                cache_key = cls._get_cache_key(image_bytes)
-                ModelRegistry._qwen_cache[cache_key] = qwen_result
-            
-            log.info(
-                "inference.qwen_verification_complete",
-                reason=reason,
-                activity=qwen_result.activity_classification,
-                confidence=qwen_result.activity_confidence,
-            )
-            
-            return qwen_result
-            
-        except Exception as e:
-            log.warning("inference.qwen_verification_failed", error=str(e), reason=reason)
-            return None
-
-    @staticmethod
-    def _build_prompt(clip_result: CLIPResult, yolo_result: YOLOResult) -> str:
-        """Build a targeted prompt for Qwen based on YOLO facts."""
-        flagged = [d["class"] for d in yolo_result.flagged_objects]
-        facts = {
-            "total_people": yolo_result.people_count,
-            "students": yolo_result.student_count,
-            "teachers": yolo_result.teacher_count,
-            "flagged_items": flagged,
-            "has_laptop": yolo_result.laptop_detected,
-            "has_phone": yolo_result.phone_detected,
-        }
-        
-        return f"""You are analysing a school photograph.
-
-Automated detection found:
-- People: {facts['total_people']} total
-- Students: {facts['students']}, Teachers: {facts['teachers']}
-- Objects visible: {', '.join(facts['flagged_items']) or 'none flagged'}
-- Equipment: {'laptop ' if facts['has_laptop'] else ''}{'phone ' if facts['has_phone'] else ''}
-
-Respond ONLY in this exact format:
-ACTIVITY: <single lowercase snake_case label you determine yourself>
-LABEL: <3-6 words describing the activity>
-DESCRIPTION: <one specific sentence, max 20 words>
-CONFIDENCE: <high|medium|low>
-SAFE: <yes|no>"""
-
-    @staticmethod
-    def _parse_qwen_response(response: str, processing_time: float, reason: str) -> QwenResult:
-        """Parse Qwen's response into structured QwenResult."""
-        lines = response.strip().split("\n")
-        parsed = {}
-        for line in lines:
-            if ":" in line:
-                key, val = line.split(":", 1)
-                parsed[key.strip().upper()] = val.strip()
-        
-        raw_activity = parsed.get("ACTIVITY", "other").lower()
-        activity_label = parsed.get("LABEL", "Unknown Activity")
-        description = parsed.get("DESCRIPTION", "")
-        confidence = parsed.get("CONFIDENCE", "low").lower()
-        safe_str = parsed.get("SAFE", "no").lower()
-        
-        # Normalise the raw activity label to a canonical category
-        category = normalise_activity(raw_activity)
-        if category == "other":
-            # Try normalising the descriptive label too
-            category = normalise_activity(activity_label)
-
-        return QwenResult(
-            activity_classification=category,
-            activity_label=activity_label,
-            activity_description=description,
-            activity_confidence=confidence,
-            people_count_estimate=None, # Qwen no longer asked for count in this format
-            safety_assessment="safe" if "yes" in safe_str else "review",
-            rejection_explanation="",
-            notes=response[:500],
-            used_for_verification=True,
-            verification_reason=reason,
-            processing_time_ms=processing_time * 1000,
-        )
-
 
 # ─── Inference Engine ─────────────────────────────────────────────────────
 
 class InferenceEngine:
-    """
-    Runs CLIP, YOLOv8, and Safety inference on images.
-    Designed for batched GPU processing.
-    """
+    """Runs CLIP, YOLOv8, Groq Vision, and Safety inference on images."""
 
     def run(
         self,
@@ -594,13 +219,9 @@ class InferenceEngine:
         mime_type: Optional[str] = None,
     ) -> InferenceResult:
         """Run all models on a single image. Groq Vision is the primary multimodal
-        analyser when enabled; Qwen-VL is used as a local fallback."""
+        analyser when enabled."""
         img_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         try:
-            # Clear cache before starting inference to maximize headroom
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
             clip_result = self._run_clip(img_pil, user_text=user_text)
         except Exception as exc:
             log.exception(
@@ -621,23 +242,9 @@ class InferenceEngine:
         )
 
         # 🌐 PRIMARY: Groq Vision API — full activity + surroundings + journal-title match
-        groq_result = self._run_groq(image_bytes, user_text, mime_type, filename)
+        groq_result = self._run_groq(image_bytes, user_text, mime_type, filename, yolo_result)
 
-        # Fallback: local Qwen-VL only when Groq is unavailable / returned an error
-        qwen_result = None
         groq_usable = groq_result is not None and not groq_result.error
-        if not groq_usable and settings.QWEN_ENABLED:
-            qwen_result = QwenVerifier.verify_and_refine(
-                image_bytes, img_pil, clip_result, yolo_result
-            )
-            if qwen_result:
-                clip_result.detected_activity = qwen_result.activity_label
-                log.info(
-                    "inference.activity_labeled_by_qwen",
-                    label=qwen_result.activity_label,
-                    category=qwen_result.activity_classification,
-                )
-
         if groq_usable:
             self._apply_groq_labels(clip_result, yolo_result, groq_result)
 
@@ -645,7 +252,6 @@ class InferenceEngine:
             clip=clip_result,
             yolo=yolo_result,
             safety=SafetyResult(nsfw_detected=False, nsfw_score=0.0),
-            qwen=qwen_result,
             groq=groq_result,
         )
 
@@ -656,11 +262,7 @@ class InferenceEngine:
         yolo_augment: Optional[bool] = None,
         mime_type: Optional[str] = None,
     ) -> List[InferenceResult]:
-        """
-        GPU-batched inference for throughput efficiency.
-        Falls back to sequential if batch fails.
-        Integrates Groq Vision (primary) and Qwen verification (fallback).
-        """
+        """Batched inference. Falls back to sequential if batch fails."""
         results = []
         try:
             pil_images = [
@@ -691,19 +293,11 @@ class InferenceEngine:
 
                 # 🌐 Groq Vision (primary)
                 groq_res = self._run_groq(
-                    img_bytes, user_text, mime_type, filename=f"batch[{i}]"
+                    img_bytes, user_text, mime_type,
+                    filename=f"batch[{i}]",
+                    yolo_result=yolo_res,
                 )
                 groq_usable = groq_res is not None and not groq_res.error
-
-                # Qwen fallback only when Groq is unavailable
-                qwen_res = None
-                if not groq_usable and settings.QWEN_ENABLED:
-                    qwen_res = QwenVerifier.verify_and_refine(
-                        img_bytes, pil_images[i], clip_res, yolo_res
-                    )
-                    if qwen_res:
-                        clip_res.detected_activity = qwen_res.activity_label
-
                 if groq_usable:
                     self._apply_groq_labels(clip_res, yolo_res, groq_res)
 
@@ -728,7 +322,6 @@ class InferenceEngine:
                     clip=clip_res,
                     yolo=yolo_res,
                     safety=safety_res,
-                    qwen=qwen_res,
                     groq=groq_res,
                 ))
         except Exception as e:
@@ -744,11 +337,30 @@ class InferenceEngine:
         user_text: Optional[str],
         mime_type: Optional[str],
         filename: Optional[str] = None,
+        yolo_result: Optional["YOLOResult"] = None,
     ) -> Optional[GroqVisionResult]:
-        """Run the Groq Vision API on a single image. Returns None if disabled."""
+        """Run the Groq Vision API on a single image. Returns None if disabled.
+
+        YOLO pre-filter: when GROQ_YOLO_PREFILTER is enabled and YOLO detected
+        zero people, we skip the Groq call entirely — school journal photos must
+        contain people, so this cuts ~30-50 % of unnecessary API calls.
+        """
         groq = ModelRegistry.get_groq()
         if groq is None:
             return None
+
+        if (
+            settings.GROQ_YOLO_PREFILTER
+            and yolo_result is not None
+            and yolo_result.people_count == 0
+        ):
+            log.info(
+                "inference.groq_skipped_no_people",
+                filename=filename,
+                reason="yolo_prefilter",
+            )
+            return None
+
         try:
             return groq.analyse(
                 image_bytes=image_bytes,
@@ -843,7 +455,7 @@ class InferenceEngine:
                 positive_score=round(pos_score, 4),
                 negative_score=round(neg_score, 4),
                 semantic_score=round(match_score, 4),
-                detected_activity="Unknown", # Labeling now handled by Qwen
+                detected_activity="Unknown",
                 match_active=(user_text is not None),
                 prompt_scores=prompt_scores,
             ))
@@ -887,17 +499,6 @@ class InferenceEngine:
                 image_index=image_index,
                 augment=augment
             )
-            
-            # 🤖 Qwen verification boost for school context refinement
-            if settings.QWEN_ENABLED:
-                qwen_res = QwenVerifier.verify_and_refine(
-                    image_bytes, img_pil, clip_result, fallback
-                )
-                if qwen_res and qwen_res.used_for_verification:
-                    # If Qwen confirms more people than YOLO, trust Qwen
-                    if qwen_res.people_count_estimate is not None and qwen_res.people_count_estimate > fallback.people_count:
-                        fallback.people_count = qwen_res.people_count_estimate
-                        fallback.uncertain_count = max(0, fallback.people_count - fallback.student_count - fallback.teacher_count)
 
             if fallback.people_count > yolo_result.people_count:
                 log.info(

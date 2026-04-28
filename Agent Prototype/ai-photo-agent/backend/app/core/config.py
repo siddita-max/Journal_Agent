@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         return v
 
     # ── Google Drive ─────────────────────────────────────────────────
-    GOOGLE_SERVICE_ACCOUNT_FILE: str = "/app/credentials/photo-agent-494106-23b977507358.json"
+    GOOGLE_SERVICE_ACCOUNT_FILE: str = "/app/credentials/photo-agent-494106-a73062df921d.json"
     GOOGLE_DRIVE_SCOPES: Union[List[str], str] = ["https://www.googleapis.com/auth/drive.readonly"]
 
     # ── Database ─────────────────────────────────────────────────────
@@ -64,14 +64,10 @@ class Settings(BaseSettings):
         return self.MINIO_PUBLIC_ENDPOINT.strip() or self.MINIO_ENDPOINT
 
     # ── AI Models ────────────────────────────────────────────────────
-    CLIP_MODEL_NAME: str = "ViT-L/14@336px"
+    CLIP_MODEL_NAME: str = "ViT-B/32"
     YOLO_MODEL_PATH: str = "yolov8s.pt"
     YOLO_AUGMENT: bool = False
-    QWEN_ENABLED: bool = False
-    QWEN_MODEL_NAME: str = "Qwen/Qwen2-VL-2B-Instruct"  # 2B model fits in 4GB VRAM (RTX 3050)
-    QWEN_DEVICE: str = "auto"  # auto | cpu | cuda
-    QWEN_CACHE_ENABLED: bool = True
-    DEVICE: str = "auto"  # auto | cpu | cuda
+    DEVICE: str = "cpu"
 
     # ── Groq Vision API (primary multimodal analyser) ────────────────
     # When GROQ_ENABLED=true and GROQ_API_KEY is provided, the inference
@@ -79,24 +75,33 @@ class Settings(BaseSettings):
     # detection, surroundings description, and journal-title matching.
     GROQ_ENABLED: bool = True
     GROQ_API_KEY: str = ""
+    # Comma-separated extra keys for round-robin rotation across free-tier quotas.
+    # E.g. GROQ_API_KEYS=gsk_key2,gsk_key3  (GROQ_API_KEY is always key #1)
+    GROQ_API_KEYS: str = ""
     GROQ_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     GROQ_TIMEOUT_S: float = 45.0
-    GROQ_MAX_TOKENS: int = 700
+    GROQ_MAX_TOKENS: int = 200
     GROQ_CACHE_ENABLED: bool = True
     GROQ_MATCH_REQUIRED: bool = True  # Hard-reject photos that don't match the journal title
+    # Skip Groq when YOLO detects zero people — saves ~30-50 % of API calls.
+    GROQ_YOLO_PREFILTER: bool = True
+    # Optional inter-call delay (seconds) to stay under per-minute rate limits.
+    GROQ_CALL_DELAY_S: float = 0.0
 
     # ── Scoring Thresholds ───────────────────────────────────────────
-    SCORE_APPROVED_THRESHOLD: float = 0.75
-    SCORE_REVIEW_THRESHOLD: float = 0.60
+    SCORE_APPROVED_THRESHOLD: float = 0.65
+    SCORE_REVIEW_THRESHOLD: float = 0.50
 
     # ── Preprocessing Limits ─────────────────────────────────────────
-    MIN_RESOLUTION_WIDTH: int = 640
-    MIN_RESOLUTION_HEIGHT: int = 480
-    MIN_BLUR_VARIANCE: float = 100.0  # Increased for "clear not blur" requirement
-    MIN_BRIGHTNESS: int = 40
-    MAX_BRIGHTNESS: int = 220
+    # Social-media uploads (Facebook/Instagram) are typically 600×600 px.
+    # Use 480×360 as minimum to pass those while still rejecting tiny thumbnails.
+    MIN_RESOLUTION_WIDTH: int = 480
+    MIN_RESOLUTION_HEIGHT: int = 360
+    MIN_BLUR_VARIANCE: float = 80.0   # Rejects clearly blurry shots; sharp activity photos score 200+
+    MIN_BRIGHTNESS: int = 45          # Reject underexposed / very dark frames
+    MAX_BRIGHTNESS: int = 215         # Reject blown-out / heavily overexposed frames
     MIN_ASPECT_RATIO: float = 0.5
-    MAX_ASPECT_RATIO: float = 3.0
+    MAX_ASPECT_RATIO: float = 2.5     # Reject unusually wide panoramas
 
     # ── Scoring Weights ──────────────────────────────────────────────
     WEIGHT_CLIP: float = 0.35
@@ -105,42 +110,14 @@ class Settings(BaseSettings):
     WEIGHT_OBJECT: float = 0.15
     WEIGHT_AESTHETIC: float = 0.10
 
-    # ── YOLO Policy ──────────────────────────────────────────────────
     def get_device(self) -> str:
-        if self.DEVICE == "auto":
-            try:
-                import torch
-                return "cuda" if torch.cuda.is_available() else "cpu"
-            except ImportError:
-                return "cpu"
-        return self.DEVICE
+        return "cpu"
 
     def get_clip_model_name(self) -> str:
-        value = (self.CLIP_MODEL_NAME or "").strip()
-        if value.lower() != "auto":
-            return value
-        return "ViT-L/14@336px" if self.get_device() == "cuda" else "ViT-B/32"
+        return (self.CLIP_MODEL_NAME or "ViT-L/14@336px").strip()
 
     def get_yolo_model_path(self) -> str:
-        value = (self.YOLO_MODEL_PATH or "").strip()
-        if value.lower() != "auto":
-            return value
-        return "/app/models/yolov8s.pt" if self.get_device() == "cuda" else "/app/models/yolov8n.pt"  # nano on CPU, small on GPU
-
-    def get_qwen_device(self) -> str:
-        if self.QWEN_DEVICE == "auto":
-            try:
-                import torch
-                return "cuda" if torch.cuda.is_available() else "cpu"
-            except ImportError:
-                return "cpu"
-        return self.QWEN_DEVICE
-
-    def get_qwen_model_name(self) -> str:
-        value = (self.QWEN_MODEL_NAME or "").strip()
-        if value.lower() != "auto":
-            return value
-        return "Qwen/Qwen2-VL-2B-Instruct"
+        return (self.YOLO_MODEL_PATH or "yolov8s.pt").strip()
 
 
 @lru_cache()

@@ -1,6 +1,4 @@
-# ─── Lightweight dev image — Python 3.11 slim (no CUDA) ──────────────────
-# Use this for local testing. GPU support is not needed on a dev machine.
-# Production: use Dockerfile (CUDA-based)
+# ─── CPU-only dev image — Python 3.11 slim ────────────────────────────────
 FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -14,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install CPU-only PyTorch first (much smaller than CUDA build)
+# Install CPU-only PyTorch
 RUN pip install --no-cache-dir \
     torch==2.2.2+cpu torchvision==0.17.2+cpu \
     --index-url https://download.pytorch.org/whl/cpu

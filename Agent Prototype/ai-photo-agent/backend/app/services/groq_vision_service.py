@@ -8,8 +8,7 @@ JSON response describing:
     - their surroundings (indoor/outdoor, room type, props, colours, lighting)
     - whether the photo matches the user-supplied journal title
     - safety / quality flags
-This replaces the on-device Qwen2-VL model so the agent works on lightweight
-hosts and surfaces real "API activity" the user can see in the live stream.
+Works on lightweight hosts and surfaces real "API activity" the user can see in the live stream.
 
 The response feeds directly into the scoring pipeline:
     journal_match == "no" or "unrelated"  →  hard rejection
@@ -28,7 +27,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 import structlog
@@ -40,44 +39,18 @@ log = structlog.get_logger()
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
 SYSTEM_PROMPT = (
-    "You are an expert school/childcare photo curator. For every image you "
-    "receive you MUST: (1) describe in full detail what the person or people "
-    "are doing — their pose, action, expression, props they hold, what they "
-    "are looking at; (2) describe their surroundings — indoor vs outdoor, "
-    "room type, walls, floor, furniture, plants, lighting, dominant colours, "
-    "any visible signage; (3) decide whether the scene clearly relates to the "
-    "given JOURNAL TITLE. Be strict — if the journal title is e.g. \"Robotics "
-    "Workshop\" and the image is a child eating lunch, mark it as not "
-    "matching. Always reply with a single JSON object and nothing else."
+    "You are a school-photo curator. Return ONLY a JSON object — no markdown, no text outside JSON. "
+    "Keys: activity (snake_case), activity_label (3-6 words), activity_detail (≤20 words: what subjects do), "
+    "surroundings (≤15 words: setting), people_count (int), role_summary (e.g. '2 children+1 teacher'), "
+    "matches_journal (yes/no: does scene relate to JOURNAL TITLE?), match_reason (≤10 words), "
+    "confidence (high/medium/low), safe (yes/no for school), "
+    "quality (good=sharp+well-lit / acceptable=minor issues / poor=blurry or unusable), "
+    "quality_note (≤10 words)."
 )
 
 USER_PROMPT_TEMPLATE = (
-    "JOURNAL TITLE: \"{journal_title}\"\n\n"
-    "Analyse the attached photograph and respond with a JSON object that has "
-    "EXACTLY these keys:\n"
-    "  - activity:           short snake_case label (e.g. \"sensory_play\", "
-    "\"art_and_craft\", \"outdoor_exploration\").\n"
-    "  - activity_label:     3-6 word human readable phrase (e.g. \"Toddler "
-    "Exploring Sensory Toys\").\n"
-    "  - activity_detail:    one or two sentences (max 40 words) describing "
-    "in vivid detail what the subject is DOING — pose, hands, expression, "
-    "props, gaze.\n"
-    "  - surroundings:       one or two sentences (max 40 words) describing "
-    "the environment — room/outdoor type, walls, floor, furniture, lighting, "
-    "background objects, dominant colours.\n"
-    "  - people_count:       integer count of people clearly visible.\n"
-    "  - role_summary:       short string e.g. \"1 toddler\", \"2 children + "
-    "1 teacher\".\n"
-    "  - matches_journal:    \"yes\" if the scene CLEARLY relates to the "
-    "journal title above, otherwise \"no\".\n"
-    "  - match_reason:       one short sentence justifying the matches_journal "
-    "decision.\n"
-    "  - confidence:         one of \"high\" | \"medium\" | \"low\".\n"
-    "  - safe:               \"yes\" if the photo is safe for a school journal, "
-    "otherwise \"no\".\n"
-    "  - quality_note:       one short sentence about photographic quality "
-    "(sharpness, lighting, composition).\n"
-    "Respond with ONLY the JSON object. No markdown, no commentary."
+    "JOURNAL TITLE: \"{journal_title}\"\n"
+    "Analyse the photo. Return ONLY the JSON object."
 )
 
 
@@ -99,11 +72,13 @@ class GroqVisionResult:
     confidence: str = "low"
     safe: str = "yes"
     quality_note: str = ""
+    quality: str = "acceptable"   # "good" | "acceptable" | "poor"
 
     raw_response: str = ""
     model: str = ""
     processing_time_ms: float = 0.0
     cached: bool = False
+    rate_limited: bool = False  # True when the API returned HTTP 429
     error: Optional[str] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -133,18 +108,52 @@ class GroqVisionService:
     _cache: Dict[str, GroqVisionResult] = {}
 
     def __init__(self) -> None:
-        self.api_key: str = (settings.GROQ_API_KEY or "").strip()
+        # Build the key pool: primary key + any extras from GROQ_API_KEYS
+        primary = (settings.GROQ_API_KEY or "").strip()
+        extras_raw = (getattr(settings, "GROQ_API_KEYS", "") or "").strip()
+        extras = [k.strip() for k in extras_raw.split(",") if k.strip()]
+        seen: set = set()
+        self._key_pool: List[str] = []
+        for k in ([primary] + extras):
+            if k and k not in seen:
+                seen.add(k)
+                self._key_pool.append(k)
+        self._key_idx: int = 0
+        # Keys that have hit their daily token limit — skipped until restart.
+        self._exhausted_keys: set = set()
+
+        # Keep api_key pointing at the first key for compatibility
+        self.api_key: str = self._key_pool[0] if self._key_pool else ""
         self.model: str = (settings.GROQ_MODEL or "meta-llama/llama-4-scout-17b-16e-instruct").strip()
-        self.enabled: bool = bool(settings.GROQ_ENABLED) and bool(self.api_key)
+        self.enabled: bool = bool(settings.GROQ_ENABLED) and bool(self._key_pool)
         self.timeout: float = float(settings.GROQ_TIMEOUT_S or 45.0)
         self.max_tokens: int = int(settings.GROQ_MAX_TOKENS or 700)
         self.cache_enabled: bool = bool(settings.GROQ_CACHE_ENABLED)
+        self.call_delay_s: float = float(getattr(settings, "GROQ_CALL_DELAY_S", 0.0))
 
-        if settings.GROQ_ENABLED and not self.api_key:
+        if settings.GROQ_ENABLED and not self._key_pool:
             log.warning(
                 "groq.disabled_no_key",
                 msg="GROQ_ENABLED=true but GROQ_API_KEY is empty — Groq calls will be skipped.",
             )
+        elif len(self._key_pool) > 1:
+            log.info("groq.key_pool_ready", key_count=len(self._key_pool))
+
+    def _next_key(self) -> str:
+        """Return the next non-exhausted API key (round-robin), skipping daily-limit keys."""
+        if not self._key_pool:
+            return ""
+        # Try every key in the pool before giving up
+        for _ in range(len(self._key_pool)):
+            key = self._key_pool[self._key_idx % len(self._key_pool)]
+            self._key_idx += 1
+            if key not in self._exhausted_keys:
+                return key
+        # All keys exhausted — return empty so caller can signal failure cleanly
+        return ""
+
+    def _active_key_count(self) -> int:
+        return len(self._key_pool) - len(self._exhausted_keys)
 
     # ── Public API ───────────────────────────────────────────────────────
 
@@ -168,6 +177,9 @@ class GroqVisionService:
             cached.cached = True
             log.info("groq.cache_hit", filename=filename, title=title[:60])
             return cached
+
+        if self.call_delay_s > 0:
+            time.sleep(self.call_delay_s)
 
         start = time.time()
         mime = mime_type or "image/jpeg"
@@ -196,34 +208,71 @@ class GroqVisionService:
                 },
             ],
         }
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
 
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(GROQ_ENDPOINT, json=payload, headers=headers)
-                resp.raise_for_status()
-                body = resp.json()
-        except httpx.HTTPStatusError as exc:
-            err_msg = self._extract_http_error(exc)
-            log.warning(
-                "groq.http_error",
-                filename=filename,
-                status=exc.response.status_code,
-                error=err_msg,
-            )
+        # Try each non-exhausted key; on daily-limit 429, mark key and move on.
+        body = None
+        last_error: Optional[str] = None
+        all_rate_limited = False
+        attempts = self._active_key_count() or len(self._key_pool)
+        for attempt in range(attempts):
+            active_key = self._next_key()
+            if not active_key:
+                all_rate_limited = True
+                break
+            headers = {
+                "Authorization": f"Bearer {active_key}",
+                "Content-Type": "application/json",
+            }
+            try:
+                with httpx.Client(timeout=self.timeout) as client:
+                    resp = client.post(GROQ_ENDPOINT, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    body = resp.json()
+                    break  # success
+            except httpx.HTTPStatusError as exc:
+                err_msg = self._extract_http_error(exc)
+                last_error = f"Groq HTTP {exc.response.status_code}: {err_msg}"
+                if exc.response.status_code == 429:
+                    is_daily = "tokens per day" in err_msg.lower() or "tpd" in err_msg.lower()
+                    if is_daily:
+                        self._exhausted_keys.add(active_key)
+                        log.warning(
+                            "groq.key_exhausted_daily",
+                            filename=filename,
+                            active_keys_remaining=self._active_key_count(),
+                            error=err_msg,
+                        )
+                        if self._active_key_count() == 0:
+                            all_rate_limited = True
+                            break
+                        continue  # retry with next key
+                    else:
+                        log.warning(
+                            "groq.rate_limited",
+                            filename=filename,
+                            status=exc.response.status_code,
+                            error=err_msg,
+                            key_pool_size=len(self._key_pool),
+                        )
+                else:
+                    log.warning(
+                        "groq.http_error",
+                        filename=filename,
+                        status=exc.response.status_code,
+                        error=err_msg,
+                    )
+                break
+            except Exception as exc:
+                last_error = f"Groq request failed: {exc}"
+                log.warning("groq.request_failed", filename=filename, error=str(exc))
+                break
+
+        if body is None:
+            if all_rate_limited:
+                log.warning("groq.all_keys_exhausted", filename=filename)
             return GroqVisionResult(
-                error=f"Groq HTTP {exc.response.status_code}: {err_msg}",
-                model=self.model,
-                processing_time_ms=(time.time() - start) * 1000.0,
-                extra={"journal_title": title},
-            )
-        except Exception as exc:
-            log.warning("groq.request_failed", filename=filename, error=str(exc))
-            return GroqVisionResult(
-                error=f"Groq request failed: {exc}",
+                error=last_error or "All Groq keys exhausted for today",
+                rate_limited=True,
                 model=self.model,
                 processing_time_ms=(time.time() - start) * 1000.0,
                 extra={"journal_title": title},
@@ -356,6 +405,16 @@ class GroqVisionService:
         safe = _str("safe", "yes").lower()
         safe = "yes" if safe.startswith("y") else "no"
 
+        quality = _str("quality", "acceptable").lower()
+        if quality not in {"good", "acceptable", "poor"}:
+            # Coerce synonyms the model might use
+            if quality.startswith("g") or "high" in quality or "great" in quality or "sharp" in quality:
+                quality = "good"
+            elif quality.startswith("p") or "blur" in quality or "bad" in quality or "low" in quality:
+                quality = "poor"
+            else:
+                quality = "acceptable"
+
         return GroqVisionResult(
             activity=_str("activity", "unknown") or "unknown",
             activity_label=_str("activity_label", "Unknown Activity") or "Unknown Activity",
@@ -368,4 +427,5 @@ class GroqVisionService:
             confidence=confidence,
             safe=safe,
             quality_note=_str("quality_note", ""),
+            quality=quality,
         )

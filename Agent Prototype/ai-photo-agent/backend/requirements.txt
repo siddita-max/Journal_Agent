@@ -29,10 +29,9 @@ torchvision==0.17.2
 clip @ git+https://github.com/openai/CLIP.git
 ultralytics==8.2.2      # YOLOv8
 nudenet==3.4.2           # Safety / NSFW detection
-transformers==4.49.0     # Qwen2-VL needs >=4.45; 4.49 is latest stable
-qwen-vl-utils==0.0.11    # Qwen2-VL utilities
-bitsandbytes==0.43.3     # 4-bit quantization for RTX 3050 4GB VRAM
-accelerate>=0.26.0       # Required for Qwen2-VL device mapping
+transformers==4.49.0
+bitsandbytes==0.43.3
+accelerate>=0.26.0
 opencv-python-headless==4.9.0.80
 Pillow==10.3.0
 numpy==1.26.4

@@ -68,7 +68,6 @@ services:
       - DEVICE=auto
       # CLIP_MODEL_NAME and YOLO_MODEL_PATH intentionally NOT overridden here
       # — the .env file values (ViT-L/14@336px, yolov8s.pt) are used directly
-      - QWEN_ENABLED=false
       - GROQ_ENABLED=${GROQ_ENABLED:-true}
     volumes:
       - ./backend:/app
@@ -99,7 +98,6 @@ services:
       - DEVICE=auto
       # CLIP_MODEL_NAME and YOLO_MODEL_PATH intentionally NOT overridden here
       # — the .env file values (ViT-L/14@336px, yolov8s.pt) are used directly
-      - QWEN_ENABLED=false
       - GROQ_ENABLED=${GROQ_ENABLED:-true}
     volumes:
       - ./backend:/app

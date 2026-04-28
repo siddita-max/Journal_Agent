@@ -370,8 +370,7 @@ def _to_summary(img: ImageRecord) -> dict:
         role_classification = f"Teachers ({img.teacher_count})"
 
     # Split the Groq narrative ("Role: ...\nActivity: ...\nSurroundings: ...") into parts
-    # so the frontend can surface them in dedicated fields. Falls back to None
-    # when the description came from another source (Qwen) or is empty.
+    # so the frontend can surface them in dedicated fields.
     activity_detail = None
     surroundings = None
     groq_role_summary = None

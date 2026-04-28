@@ -233,8 +233,6 @@ async def evaluate_image(
             activity_description = "\n".join(parts) or None
             if inf.groq.activity_label:
                 detected_activity_override = inf.groq.activity_label
-        elif inf.qwen:
-            activity_description = inf.qwen.activity_description
 
     # ── Persist to DB ─────────────────────────────────────────────────────
     record = ImageRecord(

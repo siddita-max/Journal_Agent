@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Daily Journal Preview</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Lexend:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --teal:        #006565;
+      --teal-mid:    #008080;
+      --teal-pale:   #e0f5f5;
+      --teal-faint:  #f2fafa;
+      --gap:         3px;          /* gutter between photos — keep tiny   */
+      --page-w:      1100px;
+    }
+
+    body {
+      font-family: 'Lexend', sans-serif;
+      background: #eef2f7;
+      min-height: 100vh;
+      padding: 20px 16px 40px;
+      color: #1a2332;
+    }
+
+    /* ─── Toolbar ───────────────────────────────────────────────────── */
+    .toolbar {
+      max-width: var(--page-w);
+      margin: 0 auto 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .toolbar a {
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      opacity: .85;
+    }
+    .toolbar a:hover { opacity: 1; }
+    .toolbar-right { display: flex; gap: 8px; align-items: center; }
+    #lblJobId { font-size: 11px; color: #999; font-family: 'Space Grotesk', sans-serif; }
+    .btn {
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      border: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: background .15s, opacity .15s;
+    }
+    .btn-teal  { background: var(--teal); color: #fff; }
+    .btn-teal:hover { background: var(--teal-mid); }
+    .btn-ghost { background: #fff; color: var(--teal); border: 1px solid #b2d8d8; }
+    .btn-ghost:hover { background: var(--teal-faint); }
+
+    /* ─── State overlays ────────────────────────────────────────────── */
+    .state-box {
+      max-width: var(--page-w);
+      margin: 40px auto;
+      background: #fff;
+      border-radius: 14px;
+      padding: 64px 32px;
+      text-align: center;
+      box-shadow: 0 4px 28px rgba(0,101,101,.1);
+    }
+    .state-box .icon  { font-size: 44px; margin-bottom: 14px; }
+    .state-box h2     { font-size: 16px; font-weight: 700; color: #334; margin-bottom: 8px; }
+    .state-box p      { font-size: 12px; color: #888; line-height: 1.6; }
+    .state-box .back  {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-top: 22px; padding: 10px 24px;
+      background: var(--teal); color: #fff; border-radius: 8px;
+      font-weight: 700; font-size: 13px; text-decoration: none;
+    }
+    .spinner {
+      width: 38px; height: 38px;
+      border: 3px solid var(--teal-pale);
+      border-top-color: var(--teal);
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+      margin: 0 auto 14px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── Journal page shell ────────────────────────────────────────── */
+    .journal-page {
+      max-width: var(--page-w);
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 28px rgba(0,101,101,.12);
+    }
+
+    /* ─── Header ────────────────────────────────────────────────────── */
+    .j-header {
+      background: var(--teal);
+      color: #fff;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .j-logo-wrap {
+      width: 58px; height: 58px;
+      flex-shrink: 0;
+      border-radius: 10px;
+      overflow: hidden;
+      background: rgba(255,255,255,.15);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 26px;
+    }
+    .j-logo-wrap img {
+      width: 100%; height: 100%;
+      object-fit: contain;
+      background: #fff;
+      padding: 4px;
+    }
+    .j-header-text { flex: 1; min-width: 0; }
+    .j-header-text h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 22px; font-weight: 700;
+      letter-spacing: -.02em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .j-header-meta {
+      font-size: 12.5px; opacity: .82; margin-top: 4px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .j-count-badge {
+      flex-shrink: 0;
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.28);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 12px; font-weight: 600;
+      white-space: nowrap;
+    }
+
+    /* ─── Photo grid ─────────────────────────────────────────────────
+       Zero whitespace design:
+       • Each row is display:flex with gap = var(--gap)
+       • Every cell has flex:1 so images share the row equally
+       • object-fit:cover fills each cell — no letter-boxing
+       • All rows share one uniform height (computed by JS)
+       • Background color of the grid DIV becomes the gutter color     */
+    .j-grid {
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap);
+      background: #d4d8de;   /* gutter colour */
+      line-height: 0;         /* kills gap from inline elements */
+    }
+    .j-row {
+      display: flex;
+      gap: var(--gap);
+    }
+    .j-cell {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      background: #c8cdd4;
+      min-width: 0;
+    }
+    .j-cell img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform .35s ease;
+    }
+    .j-cell:hover img { transform: scale(1.04); }
+
+    /* Gradient caption overlay */
+    .j-caption {
+      position: absolute;
+      inset: auto 0 0 0;
+      background: linear-gradient(0deg, rgba(0,0,0,.62) 0%, transparent 100%);
+      color: #fff;
+      font-size: 10px;
+      line-height: 1.35;
+      padding: 22px 8px 7px;
+      pointer-events: none;
+    }
+
+    /* ─── Activity panel ─────────────────────────────────────────────
+       Mimics the "Learn and Play" section from the PDF               */
+    .j-activity {
+      padding: 20px 24px;
+      display: flex;
+      gap: 28px;
+      align-items: flex-start;
+      border-top: 3px solid var(--teal-pale);
+      background: #fff;
+    }
+    .j-act-title {
+      min-width: 148px;
+      flex-shrink: 0;
+    }
+    .j-act-title h2 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 19px; font-weight: 700;
+      color: var(--teal);
+      line-height: 1.25;
+    }
+    .j-act-title p {
+      font-size: 11px; color: #888; margin-top: 5px;
+    }
+    .j-bullets {
+      flex: 1;
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 7px 28px;
+    }
+    .j-bullets li {
+      display: flex; gap: 8px;
+      font-size: 13px; color: #334;
+      line-height: 1.45;
+    }
+    .j-bullets li::before {
+      content: '•';
+      color: var(--teal); font-weight: 700;
+      flex-shrink: 0; margin-top: 1px;
+    }
+
+    /* ─── Journal footer ─────────────────────────────────────────────*/
+    .j-footer {
+      padding: 9px 24px;
+      background: var(--teal-faint);
+      display: flex; align-items: center; justify-content: space-between;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 11px; font-weight: 500; color: #607;
+      color: #4a7070;
+      border-top: 1px solid #c8e8e8;
+    }
+
+    /* ─── Print styles ───────────────────────────────────────────────*/
+    @media print {
+      body    { background: #fff; padding: 0; }
+      .toolbar, .btn { display: none !important; }
+      .journal-page { box-shadow: none; border-radius: 0; max-width: 100%; }
+      .j-cell:hover img { transform: none; }
+      .j-grid { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Toolbar ──────────────────────────────────────────────────── -->
+  <div class="toolbar">
+    <a href="journal_module.html">← Back to Upload</a>
+    <div class="toolbar-right">
+      <span id="lblJobId"></span>
+      <button class="btn btn-ghost" onclick="location.reload()">↺ Refresh</button>
+      <button class="btn btn-teal" onclick="window.print()">🖨 Print / Save PDF</button>
+    </div>
+  </div>
+
+  <!-- ── Loading ──────────────────────────────────────────────────── -->
+  <div id="stateLoading" class="state-box">
+    <div class="spinner"></div>
+    <h2>Building your journal…</h2>
+    <p>Fetching approved photos from the AI pipeline</p>
+  </div>
+
+  <!-- ── Error ────────────────────────────────────────────────────── -->
+  <div id="stateError" class="state-box hidden">
+    <div class="icon">⚠️</div>
+    <h2 id="errTitle">Something went wrong</h2>
+    <p id="errDetail"></p>
+    <a class="back" href="journal_module.html">← Go Back</a>
+  </div>
+
+  <!-- ── Empty ────────────────────────────────────────────────────── -->
+  <div id="stateEmpty" class="state-box hidden">
+    <div class="icon">📷</div>
+    <h2>No approved photos yet</h2>
+    <p>Run the AI pipeline first, then return here to preview your journal.</p>
+    <a class="back" href="journal_module.html">← Go Back</a>
+  </div>
+
+  <!-- ── Journal page (built by JS) ──────────────────────────────── -->
+  <div id="journalPage" class="journal-page hidden">
+
+    <header class="j-header">
+      <div id="logoWrap" class="j-logo-wrap">🏫</div>
+      <div class="j-header-text">
+        <h1 id="jTitle">Daily Journal</h1>
+        <p class="j-header-meta" id="jMeta">—</p>
+      </div>
+      <span class="j-count-badge" id="jCount">0 Photos</span>
+    </header>
+
+    <div id="jGrid" class="j-grid"></div>
+
+    <div class="j-activity">
+      <div class="j-act-title">
+        <h2 id="actTitle">Learning Today</h2>
+        <p id="actSub">AI-curated highlights</p>
+      </div>
+      <ul id="actBullets" class="j-bullets"></ul>
+    </div>
+
+    <footer class="j-footer">
+      <span id="footLeft">School Journal</span>
+      <span id="footPage">— 1 of 1 —</span>
+      <span id="footDate"></span>
+    </footer>
+
+  </div><!-- /journalPage -->
+
+  <script>
+  (function () {
+    /* ── URL params ─────────────────────────────────────────────── */
+    const qs        = new URLSearchParams(location.search);
+    const API_BASE  = (qs.get('api')        || 'http://localhost:8000').replace(/\/+$/, '');
+    const JOB_ID    = (qs.get('job_id')     || '').trim();
+    const LOGO_URL  = (qs.get('logo')       || '').trim();
+    const CLASS_NAME = decodeURIComponent(qs.get('class_name') || '');
+    const DATE_PARAM = decodeURIComponent(qs.get('date')       || '');
+
+    const $  = id => document.getElementById(id);
+    const el = id => $(id);
+
+    /* ── Show/hide states ───────────────────────────────────────── */
+    function showState(name) {
+      ['stateLoading','stateError','stateEmpty','journalPage']
+        .forEach(id => el(id).classList.toggle('hidden', id !== name));
+    }
+    function showError(title, detail) {
+      el('errTitle').textContent  = title;
+      el('errDetail').textContent = detail || '';
+      showState('stateError');
+    }
+
+    /* ── Row-layout algorithm ───────────────────────────────────────
+       Returns an array of row sizes (integers) that sum to n.
+       Goals: maximise symmetry, keep rows ≤ 4, balance the last row. */
+    function computeRows(n) {
+      const preset = {
+        1:  [1],
+        2:  [2],
+        3:  [3],
+        4:  [2, 2],
+        5:  [3, 2],
+        6:  [3, 3],
+        7:  [4, 3],
+        8:  [4, 4],
+        9:  [3, 3, 3],
+        10: [4, 3, 3],
+        11: [4, 4, 3],
+        12: [4, 4, 4],
+      };
+      if (preset[n]) return preset[n];
+      /* n > 12: fill rows of 4, adjust last row so it isn't lonely */
+      const rows = [];
+      let rem = n;
+      while (rem > 4) { rows.push(4); rem -= 4; }
+      /* If the tail is just 1, steal from the penultimate row → [3,2] */
+      if (rem === 1 && rows.length > 0) { rows[rows.length - 1] = 3; rem = 2; }
+      if (rem > 0) rows.push(rem);
+      return rows;
+    }
+
+    /* ── Uniform row height ─────────────────────────────────────────
+       All rows share one height so the grid looks like a proper mosaic.
+       Height is based on the DOMINANT (most frequent) column count.    */
+    const HEIGHT_MAP = { 1: 440, 2: 310, 3: 240, 4: 195 };
+    function uniformHeight(rows) {
+      const freq = {};
+      rows.forEach(r => freq[r] = (freq[r] || 0) + 1);
+      const dominant = Object.keys(freq).reduce((a, b) => freq[a] >= freq[b] ? a : b);
+      return HEIGHT_MAP[dominant] || 180;
+    }
+
+    /* ── Build photo grid ─────────────────────────────────────────── */
+    function buildGrid(images) {
+      const grid = el('jGrid');
+      grid.innerHTML = '';
+      if (!images.length) return;
+
+      const rows   = computeRows(images.length);
+      const rowH   = uniformHeight(rows);
+      let   imgIdx = 0;
+
+      for (const rowSize of rows) {
+        const rowEl = document.createElement('div');
+        rowEl.className = 'j-row';
+        rowEl.style.height = rowH + 'px';
+
+        for (let c = 0; c < rowSize && imgIdx < images.length; c++, imgIdx++) {
+          const img  = images[imgIdx];
+          const cell = document.createElement('div');
+          cell.className = 'j-cell';
+
+          /* Image with fallback */
+          const imgEl = document.createElement('img');
+          const pUrl  = img.preview_url  || null;
+          const fUrl  = img.db_image_url ? `${API_BASE}${img.db_image_url}` : null;
+          imgEl.src   = pUrl || fUrl || '';
+          imgEl.alt   = img.filename || '';
+          imgEl.loading = 'lazy';
+          if (pUrl && fUrl) imgEl.onerror = () => { imgEl.onerror = null; imgEl.src = fUrl; };
+
+          cell.appendChild(imgEl);
+
+          /* Caption overlay: prefer activity_detail, fall back to detected_activity */
+          const cap = (img.activity_detail || img.detected_activity || '').trim();
+          if (cap && cap.toLowerCase() !== 'unknown') {
+            const capEl = document.createElement('div');
+            capEl.className = 'j-caption';
+            capEl.textContent = cap.length > 90 ? cap.slice(0, 88) + '…' : cap;
+            cell.appendChild(capEl);
+          }
+          rowEl.appendChild(cell);
+        }
+        grid.appendChild(rowEl);
+      }
+    }
+
+    /* ── Activity bullets ────────────────────────────────────────────
+       Deduplicates Groq activity_detail sentences across approved images
+       and converts them into the "Learn and Play" bullet list.          */
+    function buildBullets(images, journalTitle) {
+      const seen    = new Set();
+      const bullets = [];
+
+      for (const img of images) {
+        const sentences = [
+          img.activity_detail,
+          img.detected_activity,
+        ].filter(Boolean);
+
+        for (const s of sentences) {
+          const text = s.trim();
+          if (!text || text.toLowerCase() === 'unknown' || text.length < 8) continue;
+          const key = text.toLowerCase().replace(/[^a-z0-9 ]/g, '').slice(0, 55);
+          if (!seen.has(key)) {
+            seen.add(key);
+            bullets.push(text);
+            if (bullets.length >= 6) break;
+          }
+        }
+        if (bullets.length >= 6) break;
+      }
+
+      /* Fallback when Groq data isn't available */
+      if (!bullets.length) {
+        bullets.push(
+          'Children actively engaged in meaningful learning activities',
+          'Collaborative play fosters social and communication skills',
+          'Creative exploration encourages curiosity and problem-solving',
+          'Learning environment is vibrant, stimulating and interactive',
+          'Active participation builds confidence and independence',
+          'Engagement with peers promotes teamwork and empathy',
+        );
+      }
+
+      const ul = el('actBullets');
+      ul.innerHTML = '';
+      bullets.forEach(text => {
+        const li = document.createElement('li');
+        li.textContent = text;
+        ul.appendChild(li);
+      });
+
+      /* Use the journal title as the section heading */
+      if (journalTitle) el('actTitle').textContent = journalTitle;
+    }
+
+    /* ── Date formatting ─────────────────────────────────────────── */
+    function fmtDate(iso) {
+      if (!iso) return '';
+      try {
+        return new Date(iso).toLocaleDateString('en-US', {
+          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        });
+      } catch (_) { return iso; }
+    }
+
+    /* ── Main load ───────────────────────────────────────────────── */
+    async function load() {
+      if (!JOB_ID) {
+        showError(
+          'No Job ID provided',
+          'Append ?job_id=YOUR_JOB_ID to the URL, or return to the upload page and click "Preview Journal" after a job completes.'
+        );
+        return;
+      }
+
+      el('lblJobId').textContent = `Job: ${JOB_ID}`;
+
+      try {
+        const [job, approvedImages] = await Promise.all([
+          fetch(`${API_BASE}/api/v1/jobs/${encodeURIComponent(JOB_ID)}`)
+            .then(r => { if (!r.ok) throw new Error(`Job not found (HTTP ${r.status})`); return r.json(); }),
+          fetch(`${API_BASE}/api/v1/images/?job_id=${encodeURIComponent(JOB_ID)}&decision=approved&limit=200`)
+            .then(r => { if (!r.ok) throw new Error(`Images load failed (HTTP ${r.status})`); return r.json(); }),
+        ]);
+
+        if (!approvedImages || !approvedImages.length) {
+          showState('stateEmpty');
+          return;
+        }
+
+        /* ── Header ── */
+        const title    = (job.journal_title || 'Daily Journal').trim();
+        const dateStr  = DATE_PARAM ? DATE_PARAM : fmtDate(job.created_at || new Date().toISOString());
+        const metaParts = [CLASS_NAME, dateStr].filter(Boolean);
+
+        el('jTitle').textContent = title;
+        el('jMeta').textContent  = metaParts.join('  |  ') || '—';
+        el('jCount').textContent = `${approvedImages.length} Photo${approvedImages.length !== 1 ? 's' : ''}`;
+
+        /* ── Logo ── */
+        if (LOGO_URL) {
+          const logoImg = document.createElement('img');
+          logoImg.src = LOGO_URL;
+          logoImg.alt = 'School logo';
+          logoImg.onerror = () => {};          // keep emoji placeholder on failure
+          el('logoWrap').replaceChildren(logoImg);
+        }
+
+        /* ── Grid ── */
+        buildGrid(approvedImages);
+
+        /* ── Bullets ── */
+        buildBullets(approvedImages, title);
+
+        /* ── Footer ── */
+        el('footLeft').textContent = CLASS_NAME ? `${CLASS_NAME} • School Journal` : 'School Journal';
+        el('footDate').textContent = dateStr;
+
+        showState('journalPage');
+
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        if (/failed to fetch/i.test(msg)) {
+          showError(
+            'Cannot reach the API server',
+            `Make sure the backend is running at ${API_BASE} and this page is opened via http://localhost:3000 (not file://).`
+          );
+        } else {
+          showError('Failed to load journal', msg);
+        }
+      }
+    }
+
+    load();
+  })();
+  </script>
+</body>
+</html>

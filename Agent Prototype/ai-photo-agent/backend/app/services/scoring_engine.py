@@ -102,9 +102,6 @@ class ScoringEngine:
             policy_reasons.extend(policy_result.reasons)
 
         if policy_reasons:
-            if inference and inference.qwen and inference.qwen.rejection_explanation:
-                policy_reasons.append(f"AI Analysis: {inference.qwen.rejection_explanation}")
-
             return ScoreResult(
                 final_score=0.0,
                 decision=Decision.REJECTED,
@@ -112,21 +109,21 @@ class ScoringEngine:
                 hard_rejected=True
             )
 
-        # ── 1.4. Groq Vision: journal-title match (hard filter) ─────
-        # When the user supplied a journal title and Groq's vision model
-        # decides the photo doesn't relate to it → hard rejection. This is
-        # the primary filter the user requested ("only select the photos
-        # that are relating to the journal title I give").
-        if (
-            settings.GROQ_MATCH_REQUIRED
-            and inference
-            and inference.groq
-            and not inference.groq.error
-            and inference.groq.extra.get("journal_title")
-            and not str(inference.groq.extra.get("journal_title", "")).lower().startswith("(no journal")
-        ):
+        # ── 1.4. Groq Vision hard filters ───────────────────────────
+        # Three sequential Groq gates, each producing an immediate rejection:
+        #   a) Journal-title mismatch   (GROQ_MATCH_REQUIRED)
+        #   b) Unsafe content
+        #   c) Poor photographic quality  ← new quality gate
+        if inference and inference.groq and not inference.groq.error:
             groq = inference.groq
-            if groq.matches_journal == "no":
+            has_title = (
+                settings.GROQ_MATCH_REQUIRED
+                and groq.extra.get("journal_title")
+                and not str(groq.extra.get("journal_title", "")).lower().startswith("(no journal")
+            )
+
+            # a) Journal-title match
+            if has_title and groq.matches_journal == "no":
                 reason = groq.match_reason or "AI determined the photo does not relate to the journal title"
                 return ScoreResult(
                     final_score=0.0,
@@ -134,6 +131,8 @@ class ScoringEngine:
                     reasons=[f"Off-topic for journal: {reason}"],
                     hard_rejected=True,
                 )
+
+            # b) Safety
             if groq.safe == "no":
                 return ScoreResult(
                     final_score=0.0,
@@ -142,6 +141,17 @@ class ScoringEngine:
                         "AI flagged photo as not safe for a school journal: "
                         + (groq.match_reason or "unsafe content detected")
                     ],
+                    hard_rejected=True,
+                )
+
+            # c) Photographic quality — reject images Groq visually rates as poor
+            #    (blurry, severely over/under-exposed, subjects unreadable)
+            if groq.quality == "poor":
+                note = groq.quality_note or "Image is blurry, too dark/bright, or subjects are unclear"
+                return ScoreResult(
+                    final_score=0.0,
+                    decision=Decision.REJECTED,
+                    reasons=[f"Poor photographic quality: {note}"],
                     hard_rejected=True,
                 )
 
@@ -169,9 +179,6 @@ class ScoringEngine:
         # ── 2. Quality Thresholds (Secondary) ───────────────────────
         quality_reasons = list(preprocess.rejection_reasons)
         if not preprocess.ok:
-            if inference and inference.qwen and inference.qwen.rejection_explanation:
-                quality_reasons.append(f"AI Analysis: {inference.qwen.rejection_explanation}")
-
             return ScoreResult(
                 final_score=0.0,
                 decision=Decision.REJECTED,
@@ -218,6 +225,16 @@ class ScoringEngine:
             + object_score * self.w_object
             + aesthetic_score * self.w_aesthetic
         )
+
+        # ── Groq quality modifier ────────────────────────────────────
+        # Groq visually inspects sharpness, lighting, and composition:
+        #   "good"       → +0.05 bonus  (reference quality like sample photos)
+        #   "acceptable" → no change
+        # ("poor" is already hard-rejected above and never reaches here)
+        if inference and inference.groq and not inference.groq.error:
+            if inference.groq.quality == "good":
+                final_score = min(1.0, final_score + 0.05)
+
         final_score = max(0.0, min(1.0, round(final_score, 4)))
 
         hard_rejected = False
@@ -245,11 +262,14 @@ class ScoringEngine:
                     f"Borderline confidence ({final_score:.2f}) — below approve threshold "
                     f"{self.approved_threshold:.2f}"
                 )
-            if inference and inference.qwen and inference.qwen.rejection_explanation:
-                reasons.append(f"AI Feedback: {inference.qwen.rejection_explanation}")
             if inference and inference.groq and inference.groq.match_reason and not inference.groq.error:
                 reasons.append(f"Groq Note: {inference.groq.match_reason}")
 
+        groq_quality = (
+            inference.groq.quality
+            if inference and inference.groq and not inference.groq.error
+            else "n/a"
+        )
         breakdown = {
             "weights": {
                 "clip_semantic_match": self.w_clip,
@@ -267,6 +287,7 @@ class ScoringEngine:
                 "aesthetic": round(aesthetic_score, 4),
                 "composition": round(composition_score, 4),
             },
+            "groq_quality": groq_quality,
             "thresholds": {
                 "approved": self.approved_threshold,
                 "review": self.review_threshold,
